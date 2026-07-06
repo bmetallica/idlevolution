@@ -60,6 +60,8 @@
     try {
       state = await fetchState();
       error = null;
+      // Insel gewachsen? → Karte neu laden (Terrain re-baked automatisch)
+      if (map && state.mapVersion != null && state.mapVersion !== (map.version ?? 0)) await loadMap();
     } catch (e) {
       error = e.message;
     }
@@ -202,7 +204,7 @@
       </div>
     {:else if roadMode}
       <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-amber-900/90 border border-amber-600 rounded-full px-4 py-1.5 text-sm whitespace-nowrap">
-        🛤️ Straße: <b>links</b> ziehen baut, <b>rechts</b> ziehen reißt ab {#if state.logistics?.roadTiles}· {state.logistics.roadTiles} Felder, +{Math.round((state.logistics.bonus || 0) * 100)}%{/if} · <kbd>ESC</kbd> beendet
+        🛤️ Straße: ziehen zeichnet eine <b>gerade Linie</b> (links baut · rechts reißt ab) {#if state.logistics?.roadTiles}· {state.logistics.roadTiles} Felder, +{Math.round((state.logistics.bonus || 0) * 100)}%{/if} · <kbd>ESC</kbd> beendet
       </div>
     {/if}
 

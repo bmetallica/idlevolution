@@ -21,6 +21,7 @@
   $: roadSet = new Set(roads);
   let painting = false;
   let erasing = false; // Straßen-Abriss-Modus (Rechtsklick)
+  let roadStart = null; // Startfeld beim Ziehen einer geraden Straße
   let paintSet = new Set(); // während des Ziehens bearbeitete Felder (Vorschau)
   let roadsCanvas = null; // Straßen offscreen gebacken (nur bei Änderung neu)
   let terrainW = 0, terrainH = 0;
@@ -479,30 +480,48 @@
     camera.x += before.x - after.x; // Zoom auf Cursor zentrieren
     camera.y += before.y - after.y;
   }
-  function paintAt(e) {
-    const g = pointerToGrid(e.offsetX, e.offsetY);
-    if (g.gx < 0 || g.gy < 0 || g.gx >= map.width || g.gy >= map.height) return;
-    const key = `${g.gx},${g.gy}`;
-    if (erasing) {
-      if (roadSet.has(key)) paintSet.add(key); // vorhandene Straße zum Entfernen markieren
-      return;
+  // Gitterlinie (Bresenham) zwischen zwei Feldern
+  function lineTiles(x0, y0, x1, y1) {
+    const pts = [];
+    let dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy, x = x0, y = y0;
+    for (let i = 0; i < 200; i++) {
+      pts.push([x, y]);
+      if (x === x1 && y === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x += sx; }
+      if (e2 < dx) { err += dx; y += sy; }
     }
-    const t = map.legend[map.tiles[g.gy * map.width + g.gx]];
-    if (t !== 'grass' && t !== 'sand') return; // nur baubares Terrain
-    if (instanceAt(g.gx, g.gy)) return; // nicht auf Gebäuden
-    if (!roadSet.has(key)) paintSet.add(key);
+    return pts;
+  }
+  function tileRoadable(gx, gy) {
+    if (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height) return false;
+    if (erasing) return roadSet.has(`${gx},${gy}`);
+    const t = map.legend[map.tiles[gy * map.width + gx]];
+    return (t === 'grass' || t === 'sand') && !instanceAt(gx, gy) && !roadSet.has(`${gx},${gy}`);
+  }
+  // Beim Ziehen eine GERADE Linie vom Start zum aktuellen Feld aufbauen
+  function roadLineTo(e) {
+    const g = pointerToGrid(e.offsetX, e.offsetY);
+    hover = g.gx >= 0 && g.gy >= 0 && g.gx < map.width && g.gy < map.height ? g : null;
+    if (!roadStart) return;
+    const ns = new Set();
+    for (const [x, y] of lineTiles(roadStart.gx, roadStart.gy, g.gx, g.gy)) if (tileRoadable(x, y)) ns.add(`${x},${y}`);
+    paintSet = ns;
   }
   function onPointerDown(e) {
-    if (roadMode) { painting = true; erasing = e.button === 2; paintSet = new Set(); paintAt(e); return; }
+    if (roadMode) {
+      painting = true; erasing = e.button === 2;
+      roadStart = pointerToGrid(e.offsetX, e.offsetY);
+      paintSet = new Set(); roadLineTo(e);
+      return;
+    }
     dragging = true;
     dragMoved = false;
     lastPointer = { x: e.offsetX, y: e.offsetY };
   }
   function onPointerMove(e) {
     if (painting) {
-      paintAt(e);
-      const gg = pointerToGrid(e.offsetX, e.offsetY);
-      hover = gg.gx >= 0 && gg.gy >= 0 && gg.gx < map.width && gg.gy < map.height ? gg : null;
+      roadLineTo(e);
       return;
     }
     if (dragging) {
@@ -523,6 +542,7 @@
       const wasErasing = erasing;
       paintSet = new Set();
       erasing = false;
+      roadStart = null;
       if (tiles.length) dispatch('road', { tiles, on: !wasErasing });
       return;
     }
@@ -581,7 +601,7 @@
 
   // Terrain nur backen, wenn eine WIRKLICH neue Karte eintrifft (nicht pro Frame)
   $: if (map && ctx) {
-    const sig = `${map.width}x${map.height}:${map.seed ?? map.tiles?.length}`;
+    const sig = `${map.width}x${map.height}:${map.version ?? map.seed ?? map.tiles?.length}`;
     if (sig !== _terrainSig) { _terrainSig = sig; buildTerrain(); bakeMini(); _roadsSig = null; }
   }
   // Straßen offscreen neu backen — nur wenn sich das Netz WIRKLICH ändert.

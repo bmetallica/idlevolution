@@ -33,6 +33,16 @@
       "meta": {}
     },
     {
+      "id": "fish",
+      "name": { "de": "Fisch", "en": "Fish" },
+      "category": "food",
+      "icon": "🐟",
+      "epoch": "stone_age",
+      "baseValue": 1,
+      "storable": true,
+      "meta": {}
+    },
+    {
       "id": "planks",
       "name": { "de": "Bretter", "en": "Planks" },
       "category": "processed",

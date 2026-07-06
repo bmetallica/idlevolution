@@ -78,6 +78,28 @@ export function generateMap(seed, width = 48, height = 48) {
   return { seed, width, height, tiles: arr.join('') };
 }
 
+/**
+ * Lässt die Insel um einen Ring wachsen: Küsten-Wasser wird zu Sand, und
+ * Sand, das dadurch kein Wasser mehr berührt, wird zu Gras (mehr Baufläche).
+ * @returns {string} neue tiles-Zeichenkette
+ */
+export function growIsland(tiles, width, height) {
+  const arr = tiles.split('');
+  const at = (a, x, y) => (x < 0 || y < 0 || x >= width || y >= height ? 'W' : a[y * width + x]);
+  const next = arr.slice();
+  // Pass 1: Wasser mit Land-Nachbar → Sand
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    if (arr[y * width + x] !== 'W') continue;
+    if (at(arr, x - 1, y) !== 'W' || at(arr, x + 1, y) !== 'W' || at(arr, x, y - 1) !== 'W' || at(arr, x, y + 1) !== 'W') next[y * width + x] = 'S';
+  }
+  // Pass 2: bisheriges Sand ohne Wasser-Nachbar → Gras
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    if (arr[y * width + x] !== 'S') continue;
+    if (at(next, x - 1, y) !== 'W' && at(next, x + 1, y) !== 'W' && at(next, x, y - 1) !== 'W' && at(next, x, y + 1) !== 'W') next[y * width + x] = 'G';
+  }
+  return next.join('');
+}
+
 export const inBounds = (map, x, y) => x >= 0 && y >= 0 && x < map.width && y < map.height;
 export const terrainAt = (map, x, y) => (inBounds(map, x, y) ? TERRAIN[map.tiles[y * map.width + x]] : null);
 

@@ -269,6 +269,46 @@
           "sand"
         ]
       }
+    },
+    {
+      "id": "fisher_hut",
+      "name": {
+        "de": "Fischerhütte",
+        "en": "Fisher's Hut"
+      },
+      "description": {
+        "de": "Fischer holen Nahrung aus dem Meer — braucht Wasser in der Nähe."
+      },
+      "category": "production",
+      "epoch": "stone_age",
+      "icon": "🎣",
+      "cost": {
+        "wood": 15
+      },
+      "buildTimeTicks": 3,
+      "workers": 2,
+      "production": {
+        "inputs": {},
+        "outputs": {
+          "fish": 0.5
+        }
+      },
+      "storage": null,
+      "housing": null,
+      "requires": null,
+      "maxCount": null,
+      "meta": {
+        "art": { "shape": "fishery" }
+      },
+      "placement": {
+        "terrain": [
+          "sand",
+          "grass"
+        ],
+        "adjacent": {
+          "water": 1
+        }
+      }
     }
   ]
 }

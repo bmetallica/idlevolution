@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { loadRegistry } from '../src/content/loader.js';
 import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity } from '../src/engine/tick.js';
 import { evaluateConditions } from '../src/engine/rules.js';
-import { generateMap, canPlace, TERRAIN, setRoad } from '../src/engine/map.js';
+import { generateMap, canPlace, TERRAIN, setRoad, growIsland } from '../src/engine/map.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const silent = { warn() {}, info() {} };
@@ -235,4 +235,12 @@ test('Straßen: Anbindung erhöht die Produktion (Logistik-Bonus)', () => {
   runTick(registry, a, game);
   runTick(registry, b, game);
   assert.ok(b.resources.wood - b0 > a.resources.wood - a0, 'mit Straße höhere Produktion');
+});
+
+test('Insel-Wachstum: Küstenwasser wird Land, Zentrum bleibt', () => {
+  const t = 'WWW' + 'WGW' + 'WWW'; // 3x3, nur Zentrum Gras
+  const g = growIsland(t, 3, 3);
+  assert.equal(g[1], 'S'); assert.equal(g[3], 'S'); assert.equal(g[5], 'S'); assert.equal(g[7], 'S');
+  assert.equal(g[4], 'G'); // Zentrum bleibt
+  assert.equal(g[0], 'W'); // Ecke (nur diagonal) bleibt Wasser
 });

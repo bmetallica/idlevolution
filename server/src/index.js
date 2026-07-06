@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { pool, migrate } from './db/index.js';
 import { createRegistryHolder } from './content/loader.js';
-import { loadGameConfig, loadState, saveState, logEvent } from './engine/state.js';
+import { loadGameConfig, loadState, saveState, logEvent, saveMapTiles } from './engine/state.js';
 import { runTick, runTicks } from './engine/tick.js';
+import { growIsland } from './engine/map.js';
 import gameRoutes from './routes/game.js';
 import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
@@ -57,7 +58,15 @@ const interval = setInterval(async () => {
     const events = runTick(registryHolder.registry, state, game);
     for (const e of events) {
       logEvent(pool, e.type, e.payload).catch(() => {});
-      if (e.type === 'epoch_advance') log.info(`Epochen-Aufstieg: ${e.payload.from} → ${e.payload.to}`);
+      if (e.type === 'epoch_advance') {
+        log.info(`Epochen-Aufstieg: ${e.payload.from} → ${e.payload.to}`);
+        // Insel wächst um einen Ring → mehr Baufläche für die neue Ausbaustufe
+        state.map.tiles = growIsland(state.map.tiles, state.map.width, state.map.height);
+        state.mapVersion = (state.mapVersion || 0) + 1;
+        await saveMapTiles(pool, state.map.tiles);
+        await saveState(pool, state);
+        log.info(`Insel gewachsen (Karten-Version ${state.mapVersion})`);
+      }
     }
     tickCounter += 1;
     if (tickCounter % config.persistEveryTicks === 0) await saveState(pool, state);

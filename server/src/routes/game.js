@@ -68,6 +68,7 @@ export default async function gameRoutes(fastify) {
           : [],
       },
       satisfaction: state.satisfaction ?? 1,
+      mapVersion: state.mapVersion || 0,
       roads: [...(state.roads || [])],
       logistics: (() => {
         const cov = roadCoverage(state, registry);
@@ -111,6 +112,7 @@ export default async function gameRoutes(fastify) {
     width: ctx.state.map.width,
     height: ctx.state.map.height,
     tiles: ctx.state.map.tiles,
+    version: ctx.state.mapVersion || 0,
     legend: TERRAIN,
   }));
 

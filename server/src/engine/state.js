@@ -41,6 +41,7 @@ export function newState(game, registry, map) {
     buildings: {},
     instances: [],
     roads: new Set(),
+    mapVersion: 0,
     nextInstanceId: 1,
     map,
     lastTickAt: Date.now(),
@@ -92,6 +93,7 @@ export async function loadState(pool, game, registry) {
       counted: Number(r.done_at_tick) <= tick,
     })),
     roads: new Set(row.extra?.roads || []),
+    mapVersion: row.extra?.mapVersion || 0,
     nextInstanceId: row.extra?.nextInstanceId || 1,
     map,
     lastTickAt: new Date(row.last_tick_at).getTime(),
@@ -126,7 +128,7 @@ export async function saveState(pool, state) {
          current_epoch = EXCLUDED.current_epoch, tick = EXCLUDED.tick,
          population = EXCLUDED.population, last_tick_at = EXCLUDED.last_tick_at,
          extra = EXCLUDED.extra`,
-      [state.epochId, state.tick, state.population, Date.now(), JSON.stringify({ nextInstanceId: state.nextInstanceId, roads: [...(state.roads || [])] })]
+      [state.epochId, state.tick, state.population, Date.now(), JSON.stringify({ nextInstanceId: state.nextInstanceId, roads: [...(state.roads || [])], mapVersion: state.mapVersion || 0 })]
     );
     await client.query('DELETE FROM resource_stock');
     for (const [rid, amount] of Object.entries(state.resources)) {
@@ -158,4 +160,9 @@ export async function saveState(pool, state) {
 
 export async function logEvent(pool, type, payload = {}) {
   await pool.query('INSERT INTO event_log (type, payload) VALUES ($1, $2)', [type, JSON.stringify(payload)]);
+}
+
+/** Persistiert die (gewachsene) Karten-Tiles. */
+export async function saveMapTiles(pool, tiles) {
+  await pool.query('UPDATE world_map SET tiles = $1 WHERE id = 1', [tiles]);
 }
