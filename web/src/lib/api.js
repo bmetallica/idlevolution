@@ -1,0 +1,53 @@
+async function json(res) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+export const fetchContent = () => fetch('/api/content').then(json);
+export const fetchState = () => fetch('/api/state').then(json);
+export const fetchMap = () => fetch('/api/map').then(json);
+
+export const build = (buildingId, x, y, rot = 0) =>
+  fetch('/api/build', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ buildingId, x, y, rot }),
+  }).then(json);
+
+export const demolishInstance = (instanceId) =>
+  fetch('/api/demolish', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ instanceId }),
+  }).then(json);
+
+export const setWorkers = (buildingId, delta) =>
+  fetch('/api/workers', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ buildingId, delta }),
+  }).then(json);
+
+export const setRoad = (tiles, on) =>
+  fetch('/api/road', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tiles, on }),
+  }).then(json);
+
+export const fetchAiLog = () => fetch('/api/ai-log').then(json);
+
+export const disablePack = (packId) =>
+  fetch('/api/pack/disable', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ packId }),
+  }).then(json);
+
+export const rotateInstance = (instanceId) =>
+  fetch('/api/rotate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ instanceId }),
+  }).then(json);

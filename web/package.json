@@ -1,0 +1,18 @@
+{
+  "name": "idlevolution-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.1.2",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "svelte": "^4.2.19",
+    "tailwindcss": "^3.4.13",
+    "vite": "^5.4.8"
+  }
+}

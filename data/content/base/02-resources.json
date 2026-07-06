@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "pack": { "id": "base-resources", "source": "human", "createdAt": "2026-07-05" },
+  "resources": [
+    {
+      "id": "wood",
+      "name": { "de": "Holz", "en": "Wood" },
+      "category": "raw",
+      "icon": "🪵",
+      "epoch": "stone_age",
+      "baseValue": 1,
+      "storable": true,
+      "meta": {}
+    },
+    {
+      "id": "stone",
+      "name": { "de": "Stein", "en": "Stone" },
+      "category": "raw",
+      "icon": "🪨",
+      "epoch": "stone_age",
+      "baseValue": 1,
+      "storable": true,
+      "meta": {}
+    },
+    {
+      "id": "food",
+      "name": { "de": "Nahrung", "en": "Food" },
+      "category": "food",
+      "icon": "🍖",
+      "epoch": "stone_age",
+      "baseValue": 1,
+      "storable": true,
+      "meta": {}
+    },
+    {
+      "id": "planks",
+      "name": { "de": "Bretter", "en": "Planks" },
+      "category": "processed",
+      "icon": "🪚",
+      "epoch": "stone_age",
+      "baseValue": 2,
+      "storable": true,
+      "meta": {}
+    },
+    {
+      "id": "tools",
+      "name": { "de": "Werkzeuge", "en": "Tools" },
+      "category": "processed",
+      "icon": "🔨",
+      "epoch": "stone_age",
+      "baseValue": 5,
+      "storable": true,
+      "meta": {}
+    }
+  ]
+}

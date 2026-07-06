@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Secrets & lokale Konfiguration (NIE committen)
+.env
+.env.local
+
+# Build-Output (wird im Docker-Build erzeugt)
+web/dist/
+
+# Laufzeit-Daten: nur Basis-Inhalte + Balancing versionieren,
+# von der KI generierte/laufende Artefakte ausschließen.
+data/content/generated/
+data/content/disabled/
+data/exports/
+data/rejected/
+data/backups/
+
+# OS / Editor / Logs
+.DS_Store
+Thumbs.db
+*.log

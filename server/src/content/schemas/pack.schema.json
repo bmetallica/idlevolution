@@ -1,0 +1,41 @@
+{
+  "$id": "pack",
+  "type": "object",
+  "required": ["schemaVersion", "pack"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "pack": {
+      "type": "object",
+      "required": ["id", "source"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,60}$" },
+        "source": { "enum": ["human", "ai"] },
+        "createdAt": { "type": "string" },
+        "model": { "type": "string" }
+      }
+    },
+    "chronicle": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "maxLength": 2000 }
+    },
+    "resources": { "type": "array", "items": { "$ref": "resource" } },
+    "buildings": { "type": "array", "items": { "$ref": "building" } },
+    "epochs": { "type": "array", "items": { "$ref": "epoch" } },
+    "events": { "type": "array", "items": { "$ref": "event" } },
+    "epochAdvance": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,40}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resources": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0 } },
+          "buildings": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0 } },
+          "population": { "type": "number", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

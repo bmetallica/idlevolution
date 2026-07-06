@@ -1,0 +1,274 @@
+{
+  "schemaVersion": 1,
+  "pack": {
+    "id": "base-buildings",
+    "source": "human",
+    "createdAt": "2026-07-05"
+  },
+  "buildings": [
+    {
+      "id": "hut",
+      "name": {
+        "de": "Hütte",
+        "en": "Hut"
+      },
+      "description": {
+        "de": "Ein einfaches Dach über dem Kopf für fünf Siedler."
+      },
+      "category": "housing",
+      "epoch": "stone_age",
+      "icon": "🛖",
+      "cost": {
+        "wood": 15
+      },
+      "buildTimeTicks": 3,
+      "workers": 0,
+      "production": null,
+      "storage": null,
+      "housing": {
+        "capacity": 5
+      },
+      "requires": null,
+      "maxCount": null,
+      "meta": {},
+      "placement": {
+        "terrain": [
+          "grass",
+          "sand"
+        ]
+      }
+    },
+    {
+      "id": "gatherer_hut",
+      "name": {
+        "de": "Sammlerhütte",
+        "en": "Gatherer's Hut"
+      },
+      "description": {
+        "de": "Sammler durchstreifen die Umgebung nach Beeren und Wurzeln."
+      },
+      "category": "production",
+      "epoch": "stone_age",
+      "icon": "🌾",
+      "cost": {
+        "wood": 10
+      },
+      "buildTimeTicks": 3,
+      "workers": 2,
+      "production": {
+        "inputs": {},
+        "outputs": {
+          "food": 0.6
+        }
+      },
+      "storage": null,
+      "housing": null,
+      "requires": null,
+      "maxCount": null,
+      "meta": {},
+      "placement": {
+        "terrain": [
+          "grass"
+        ],
+        "adjacent": {
+          "forest": 1
+        }
+      }
+    },
+    {
+      "id": "lumberjack",
+      "name": {
+        "de": "Holzfäller",
+        "en": "Lumberjack"
+      },
+      "description": {
+        "de": "Fällt Bäume und liefert stetig Holz."
+      },
+      "category": "production",
+      "epoch": "stone_age",
+      "icon": "🪓",
+      "cost": {
+        "wood": 10,
+        "stone": 5
+      },
+      "buildTimeTicks": 4,
+      "workers": 2,
+      "production": {
+        "inputs": {},
+        "outputs": {
+          "wood": 0.5
+        }
+      },
+      "storage": null,
+      "housing": null,
+      "requires": null,
+      "maxCount": null,
+      "meta": {},
+      "placement": {
+        "terrain": [
+          "grass"
+        ],
+        "adjacent": {
+          "forest": 2
+        }
+      }
+    },
+    {
+      "id": "quarry",
+      "name": {
+        "de": "Steinbruch",
+        "en": "Quarry"
+      },
+      "description": {
+        "de": "Bricht Stein aus dem Fels — Grundlage für alles Weitere."
+      },
+      "category": "production",
+      "epoch": "stone_age",
+      "icon": "⛏️",
+      "cost": {
+        "wood": 20
+      },
+      "buildTimeTicks": 5,
+      "workers": 2,
+      "production": {
+        "inputs": {},
+        "outputs": {
+          "stone": 0.4
+        }
+      },
+      "storage": null,
+      "housing": null,
+      "requires": {
+        "buildings": {
+          "lumberjack": 1
+        }
+      },
+      "maxCount": null,
+      "meta": {},
+      "placement": {
+        "terrain": [
+          "grass"
+        ],
+        "adjacent": {
+          "rock": 1
+        }
+      }
+    },
+    {
+      "id": "sawmill",
+      "name": {
+        "de": "Sägewerk",
+        "en": "Sawmill"
+      },
+      "description": {
+        "de": "Verarbeitet Holz zu nützlichen Brettern."
+      },
+      "category": "production",
+      "epoch": "stone_age",
+      "icon": "🪚",
+      "cost": {
+        "wood": 30,
+        "stone": 10
+      },
+      "buildTimeTicks": 6,
+      "workers": 2,
+      "production": {
+        "inputs": {
+          "wood": 0.6
+        },
+        "outputs": {
+          "planks": 0.4
+        }
+      },
+      "storage": null,
+      "housing": null,
+      "requires": {
+        "buildings": {
+          "lumberjack": 1
+        }
+      },
+      "maxCount": null,
+      "meta": {},
+      "placement": {
+        "terrain": [
+          "grass"
+        ]
+      }
+    },
+    {
+      "id": "toolmaker",
+      "name": {
+        "de": "Werkzeugmacher",
+        "en": "Toolmaker"
+      },
+      "description": {
+        "de": "Fertigt aus Brettern und Stein einfache Werkzeuge."
+      },
+      "category": "production",
+      "epoch": "stone_age",
+      "icon": "🔨",
+      "cost": {
+        "planks": 15,
+        "stone": 20
+      },
+      "buildTimeTicks": 8,
+      "workers": 2,
+      "production": {
+        "inputs": {
+          "planks": 0.2,
+          "stone": 0.2
+        },
+        "outputs": {
+          "tools": 0.15
+        }
+      },
+      "storage": null,
+      "housing": null,
+      "requires": {
+        "buildings": {
+          "sawmill": 1
+        }
+      },
+      "maxCount": null,
+      "meta": {},
+      "placement": {
+        "terrain": [
+          "grass"
+        ]
+      }
+    },
+    {
+      "id": "storage_pit",
+      "name": {
+        "de": "Vorratsgrube",
+        "en": "Storage Pit"
+      },
+      "description": {
+        "de": "Erhöht die Lagerkapazität für alle Ressourcen."
+      },
+      "category": "storage",
+      "epoch": "stone_age",
+      "icon": "🏺",
+      "cost": {
+        "wood": 20,
+        "stone": 10
+      },
+      "buildTimeTicks": 4,
+      "workers": 0,
+      "production": null,
+      "storage": {
+        "*": 150
+      },
+      "housing": null,
+      "requires": null,
+      "maxCount": null,
+      "meta": {},
+      "placement": {
+        "terrain": [
+          "grass",
+          "sand"
+        ]
+      }
+    }
+  ]
+}

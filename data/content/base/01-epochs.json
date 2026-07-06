@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "pack": { "id": "base-epochs", "source": "human", "createdAt": "2026-07-05" },
+  "epochs": [
+    {
+      "id": "stone_age",
+      "order": 0,
+      "name": { "de": "Steinzeit", "en": "Stone Age" },
+      "description": { "de": "Der Anfang: Holz, Stein und der tägliche Kampf ums Essen." },
+      "advance": {
+        "resources": { "tools": 30 },
+        "buildings": { "toolmaker": 1 },
+        "population": 15
+      },
+      "modifiers": { "productionMultiplier": 1.0, "populationGrowth": 0.01 },
+      "tier": { "name": { "de": "Jäger & Sammler", "en": "Hunters & Gatherers" } },
+      "needs": null,
+      "meta": {}
+    },
+    {
+      "id": "bronze_age",
+      "order": 1,
+      "name": { "de": "Bronzezeit", "en": "Bronze Age" },
+      "description": { "de": "Metall verändert alles. Diese Epoche wartet darauf, gefüllt zu werden." },
+      "advance": null,
+      "modifiers": { "productionMultiplier": 1.25, "populationGrowth": 0.012 },
+      "tier": { "name": { "de": "Siedler", "en": "Settlers" } },
+      "needs": { "tools": 0.01 },
+      "meta": {}
+    }
+  ]
+}

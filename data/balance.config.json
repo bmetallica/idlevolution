@@ -1,0 +1,30 @@
+{
+  "game": {
+    "initial": {
+      "epoch": "stone_age",
+      "population": 5,
+      "resources": { "wood": 60, "stone": 30, "food": 50 },
+      "buildings": { "hut": { "count": 1, "workers": 0 } }
+    },
+    "baseStorage": 200,
+    "baseHousing": 5,
+    "foodPerPopPerTick": 0.05,
+    "popDeclineRate": 0.005
+  },
+  "balance": {
+    "workerValuePerTick": 0.3,
+    "netValueSlack": 1.5,
+    "maxIncreaseOverBest": 0.25,
+    "epochValueGrowth": 2.0,
+    "minAmortizationTicks": 60,
+    "maxBuildTimeTicks": 500,
+    "maxWorkers": 20,
+    "maxStoragePerResource": 100000,
+    "maxHousingCapacity": 100,
+    "resourceBaseValueRange": [0.1, 1000],
+    "maxNewResourcesPerPack": 3,
+    "maxNewBuildingsPerPack": 4,
+    "maxNewEpochsPerPack": 1,
+    "sandbox": { "ticks": 1000, "maxResourceAmount": 1000000000 }
+  }
+}

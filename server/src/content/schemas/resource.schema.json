@@ -1,0 +1,24 @@
+{
+  "$id": "resource",
+  "type": "object",
+  "required": ["id", "name", "category", "epoch", "baseValue"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,40}$" },
+    "name": {
+      "type": "object",
+      "required": ["de"],
+      "additionalProperties": { "type": "string", "maxLength": 80 }
+    },
+    "description": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "maxLength": 500 }
+    },
+    "category": { "enum": ["raw", "processed", "food", "luxury", "special"] },
+    "icon": { "type": "string", "maxLength": 8 },
+    "epoch": { "type": "string" },
+    "baseValue": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000000 },
+    "storable": { "type": "boolean" },
+    "meta": { "type": "object" }
+  }
+}

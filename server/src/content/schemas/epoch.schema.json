@@ -1,0 +1,58 @@
+{
+  "$id": "epoch",
+  "type": "object",
+  "required": ["id", "order", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,40}$" },
+    "order": { "type": "integer", "minimum": 0, "maximum": 1000 },
+    "name": {
+      "type": "object",
+      "required": ["de"],
+      "additionalProperties": { "type": "string", "maxLength": 80 }
+    },
+    "description": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "maxLength": 500 }
+    },
+    "advance": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "resources": {
+          "type": "object",
+          "additionalProperties": { "type": "number", "minimum": 0 }
+        },
+        "buildings": {
+          "type": "object",
+          "additionalProperties": { "type": "number", "minimum": 0 }
+        },
+        "population": { "type": "number", "minimum": 0 }
+      }
+    },
+    "modifiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "productionMultiplier": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+        "populationGrowth": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "needs": {
+      "type": ["object", "null"],
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 100 }
+    },
+    "tier": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "object",
+          "required": ["de"],
+          "additionalProperties": { "type": "string", "maxLength": 80 }
+        }
+      }
+    },
+    "meta": { "type": "object" }
+  }
+}
