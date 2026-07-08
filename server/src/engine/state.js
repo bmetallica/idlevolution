@@ -166,7 +166,7 @@ export async function logEvent(pool, type, payload = {}) {
   await pool.query('INSERT INTO event_log (type, payload) VALUES ($1, $2)', [type, JSON.stringify(payload)]);
 }
 
-/** Persistiert die (gewachsene) Karten-Tiles. */
-export async function saveMapTiles(pool, tiles) {
-  await pool.query('UPDATE world_map SET tiles = $1 WHERE id = 1', [tiles]);
+/** Persistiert die (gewachsene) Karte inkl. Dimensionen. */
+export async function saveMapTiles(pool, map) {
+  await pool.query('UPDATE world_map SET tiles = $1, width = $2, height = $3 WHERE id = 1', [map.tiles, map.width, map.height]);
 }

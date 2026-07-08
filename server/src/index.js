@@ -7,7 +7,7 @@ import { pool, migrate } from './db/index.js';
 import { createRegistryHolder } from './content/loader.js';
 import { loadGameConfig, loadState, saveState, logEvent, saveMapTiles } from './engine/state.js';
 import { runTick, runTicks } from './engine/tick.js';
-import { growIsland } from './engine/map.js';
+import { growWorld, landTouchesBorder } from './engine/map.js';
 import gameRoutes from './routes/game.js';
 import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
@@ -38,6 +38,15 @@ if (missedTicks > 0) {
   log.info(`Offline-Progression: ${missedTicks} Ticks nachgeholt (${events.length} Ereignisse)`);
 }
 
+// Fehlt der Wasser-Rand (Insel stößt an den Rand)? → Spielfeld vergrößern.
+let guard = 0;
+while (landTouchesBorder(state.map, 2) && guard++ < 6) {
+  growWorld(state);
+  await saveMapTiles(pool, state.map);
+  await saveState(pool, state);
+  log.info(`Wasser-Rand ergänzt → Spielfeld ${state.map.width}×${state.map.height}`);
+}
+
 // ── App-Kontext für alle Routen ──
 const ctx = { config, pool, registryHolder, state, game, balance };
 fastify.decorate('gameCtx', ctx);
@@ -60,12 +69,11 @@ const interval = setInterval(async () => {
       logEvent(pool, e.type, e.payload).catch(() => {});
       if (e.type === 'epoch_advance') {
         log.info(`Epochen-Aufstieg: ${e.payload.from} → ${e.payload.to}`);
-        // Insel wächst um einen Ring → mehr Baufläche für die neue Ausbaustufe
-        state.map.tiles = growIsland(state.map.tiles, state.map.width, state.map.height);
-        state.mapVersion = (state.mapVersion || 0) + 1;
-        await saveMapTiles(pool, state.map.tiles);
+        // Ganzes Spielfeld wächst (Wasserring rundum) + Insel legt einen Ring zu
+        growWorld(state);
+        await saveMapTiles(pool, state.map);
         await saveState(pool, state);
-        log.info(`Insel gewachsen (Karten-Version ${state.mapVersion})`);
+        log.info(`Spielfeld gewachsen auf ${state.map.width}×${state.map.height} (Version ${state.mapVersion})`);
       }
     }
     tickCounter += 1;

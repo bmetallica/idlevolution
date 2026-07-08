@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { loadRegistry } from '../src/content/loader.js';
 import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity } from '../src/engine/tick.js';
 import { evaluateConditions } from '../src/engine/rules.js';
-import { generateMap, canPlace, TERRAIN, setRoad, growIsland } from '../src/engine/map.js';
+import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '../src/engine/map.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const silent = { warn() {}, info() {} };
@@ -245,4 +245,21 @@ test('Insel-Wachstum: Küstenwasser wird Land, Zentrum bleibt', () => {
   assert.equal(g[1], 'S'); assert.equal(g[3], 'S'); assert.equal(g[5], 'S'); assert.equal(g[7], 'S');
   assert.equal(g[4], 'G'); // Zentrum bleibt
   assert.equal(g[0], 'W'); // Ecke (nur diagonal) bleibt Wasser
+});
+
+test('Spielfeld-Wachstum: Raster wächst, Inhalte verschieben sich zentriert', () => {
+  const state = freshState({
+    map: testMap(['GGG', 'GGG', 'GGG']),
+    instances: [{ id: 1, buildingId: 'hut', x: 1, y: 1, doneAtTick: 0, counted: true }],
+    roads: new Set(['0,0']),
+    placed: { '2,2': 'tree' },
+    cleared: new Set(),
+  });
+  growWorld(state, 4); // +4 → Offset 2
+  assert.equal(state.map.width, 7);
+  assert.equal(state.map.height, 7);
+  assert.equal(state.instances[0].x, 3); // 1+2
+  assert.equal(state.instances[0].y, 3);
+  assert.ok(state.roads.has('2,2')); // 0,0 → +2
+  assert.equal(state.placed['4,4'], 'tree'); // 2,2 → +2
 });

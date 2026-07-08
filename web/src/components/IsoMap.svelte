@@ -32,8 +32,8 @@
   let roadsCanvas = null; // Straßen offscreen gebacken (nur bei Änderung neu)
   let terrainW = 0, terrainH = 0;
   let _terrainSig = null, _roadsSig = null; // Signaturen: nur bei echter Änderung neu backen
-  // Minimap
-  const MINI = 3;
+  // Minimap (Pixel/Tile adaptiv, damit sie bei wachsender Karte ~150px bleibt)
+  $: MINI = map ? Math.max(2, Math.round(150 / map.width)) : 3;
   let miniCanvas, miniCtx, miniTerrain = null;
 
   const dispatch = createEventDispatcher();
@@ -271,10 +271,10 @@
     const amb = rt.amb, now = rt.now;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, viewW, viewH);
-    // Himmel-Verlauf, tageszeitabhängig
+    // Hintergrund = offenes Meer (kein dunkler Void), tageszeitabhängig
     const grd = ctx.createLinearGradient(0, 0, 0, viewH);
-    grd.addColorStop(0, `rgb(${mix(26, 8, amb.night)}, ${mix(42, 14, amb.night)}, ${mix(58, 34, amb.night)})`);
-    grd.addColorStop(1, `rgb(${mix(12, 4, amb.night)}, ${mix(22, 8, amb.night)}, ${mix(32, 18, amb.night)})`);
+    grd.addColorStop(0, `rgb(${mix(40, 12, amb.night)}, ${mix(96, 30, amb.night)}, ${mix(130, 52, amb.night)})`);
+    grd.addColorStop(1, `rgb(${mix(28, 8, amb.night)}, ${mix(70, 22, amb.night)}, ${mix(100, 40, amb.night)})`);
     ctx.fillStyle = grd;
     ctx.fillRect(0, 0, viewW, viewH);
 

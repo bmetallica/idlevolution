@@ -117,6 +117,41 @@ export function growIsland(tiles, width, height) {
   return next.join('');
 }
 
+/**
+ * Vergrößert das GESAMTE Spielfeld um `grow` Felder (Wasserring rundum) und
+ * verschiebt alle Inhalte zentriert, sodass die Insel stets von Wasser umgeben
+ * bleibt. Danach wächst die Insel um einen Ring. Mutiert state.
+ */
+export function growWorld(state, grow = 8) {
+  const N = state.map.width;
+  const N2 = N + grow, off = grow >> 1;
+  const old = state.map.tiles;
+  const arr = new Array(N2 * N2).fill('W');
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) arr[(y + off) * N2 + (x + off)] = old[y * N + x];
+  state.map.tiles = growIsland(arr.join(''), N2, N2);
+  state.map.width = N2; state.map.height = N2;
+  const shift = (k) => { const c = k.indexOf(','); return `${+k.slice(0, c) + off},${+k.slice(c + 1) + off}`; };
+  for (const inst of state.instances || []) { inst.x += off; inst.y += off; }
+  state.roads = new Set([...(state.roads || [])].map(shift));
+  state.cleared = new Set([...(state.cleared || [])].map(shift));
+  const np = {}; for (const [k, v] of Object.entries(state.placed || {})) np[shift(k)] = v;
+  state.placed = np;
+  state.mapVersion = (state.mapVersion || 0) + 1;
+  return { width: N2, height: N2, offset: off };
+}
+
+/** Land-Feld am äußeren Rand? (dann fehlt der Wasser-Rand → Spielfeld wachsen lassen) */
+export function landTouchesBorder(map, margin = 1) {
+  const { width: W, height: H, tiles } = map;
+  for (let x = 0; x < W; x++) for (let m = 0; m < margin; m++) {
+    if (tiles[m * W + x] !== 'W' || tiles[(H - 1 - m) * W + x] !== 'W') return true;
+  }
+  for (let y = 0; y < H; y++) for (let m = 0; m < margin; m++) {
+    if (tiles[y * W + m] !== 'W' || tiles[y * W + (W - 1 - m)] !== 'W') return true;
+  }
+  return false;
+}
+
 export const inBounds = (map, x, y) => x >= 0 && y >= 0 && x < map.width && y < map.height;
 export const terrainAt = (map, x, y) => (inBounds(map, x, y) ? TERRAIN[map.tiles[y * map.width + x]] : null);
 
