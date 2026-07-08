@@ -68,8 +68,25 @@ export function generateMap(seed, width = 48, height = 48) {
     }
   }
 
-  // Startbereich in der Mitte freiräumen, damit die erste Siedlung Platz hat
   const arr = tiles.split('');
+
+  // Flüsse: 1-2 schmale, mäandernde Wasserläufe quer über die Insel (Brücken nötig)
+  const rivers = 1 + Math.floor(rand() * 2);
+  for (let r = 0; r < rivers; r++) {
+    const horizontal = rand() < 0.5;
+    const dir = rand() < 0.5 ? -1 : 1;
+    let px = horizontal ? Math.floor(cx) : Math.floor(rand() * width);
+    let py = horizontal ? Math.floor(rand() * height) : Math.floor(cy);
+    for (let step = 0; step < Math.max(width, height) * 1.6; step++) {
+      if (px < 0 || py < 0 || px >= width || py >= height) break;
+      arr[py * width + px] = 'W';
+      if (rand() < 0.35 && px + 1 < width) arr[py * width + px + 1] = 'W'; // leichte Breite
+      if (horizontal) { px += dir; if (rand() < 0.4) py += rand() < 0.5 ? -1 : 1; }
+      else { py += dir; if (rand() < 0.4) px += rand() < 0.5 ? -1 : 1; }
+    }
+  }
+
+  // Startbereich in der Mitte freiräumen, damit die erste Siedlung Platz hat
   for (let y = Math.floor(cy) - 3; y <= Math.floor(cy) + 3; y++) {
     for (let x = Math.floor(cx) - 3; x <= Math.floor(cx) + 3; x++) {
       if (arr[y * width + x] !== 'W') arr[y * width + x] = 'G';
@@ -182,7 +199,8 @@ export function canPlace(map, state, registry, def, x, y, rot = 0) {
 }
 
 // ── Straßen (Infrastruktur) ─────────────────────────────────────────────────
-const ROAD_TERRAIN = ['grass', 'sand'];
+// Straßen auf Wasser werden als Brücken gerendert.
+const ROAD_TERRAIN = ['grass', 'sand', 'water'];
 
 /** Setzt/entfernt eine Straße auf (x,y). state.roads ist ein Set aus "x,y". */
 export function setRoad(map, state, registry, x, y, on) {

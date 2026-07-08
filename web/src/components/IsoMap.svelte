@@ -378,6 +378,26 @@
     g.closePath(); g.fill();
     if (!style) { g.fillStyle = '#c2a878'; g.beginPath(); g.ellipse(cx, cy, TILE_W * 0.28, TILE_H * 0.28, 0, 0, Math.PI * 2); g.fill(); }
   }
+  // Holzbrücke über Wasser zeichnen
+  function drawBridge(g, cx, cy) {
+    g.fillStyle = '#7a5c34';
+    g.beginPath();
+    g.moveTo(cx, cy - TILE_H / 2); g.lineTo(cx + TILE_W / 2, cy);
+    g.lineTo(cx, cy + TILE_H / 2); g.lineTo(cx - TILE_W / 2, cy);
+    g.closePath(); g.fill();
+    // Planken
+    g.strokeStyle = 'rgba(45,30,15,0.5)'; g.lineWidth = 1;
+    for (let k = -1; k <= 1; k++) {
+      const ox = k * TILE_W * 0.22, oy = k * TILE_H * 0.22;
+      g.beginPath();
+      g.moveTo(cx - TILE_W * 0.3 + ox, cy - oy + TILE_H * 0.15);
+      g.lineTo(cx + TILE_W * 0.3 + ox, cy - oy - TILE_H * 0.15);
+      g.stroke();
+    }
+    // helles Geländer entlang der oberen Kanten
+    g.strokeStyle = 'rgba(190,160,110,0.65)'; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(cx - TILE_W / 2, cy); g.lineTo(cx, cy - TILE_H / 2); g.lineTo(cx + TILE_W / 2, cy); g.stroke();
+  }
   // Straßen einmal offscreen backen (nur wenn sich das Netz ändert)
   function buildRoadsCanvas() {
     if (!map || !terrainW) return;
@@ -386,8 +406,10 @@
     const g = c.getContext('2d');
     for (const key of roadSet) {
       const ci = key.indexOf(',');
-      const p = gridToScreen(+key.slice(0, ci), +key.slice(ci + 1));
-      drawRoadShape(g, p.x + terrainOff.x, p.y + terrainOff.y, null);
+      const gx = +key.slice(0, ci), gy = +key.slice(ci + 1);
+      const p = gridToScreen(gx, gy);
+      if (map.legend[map.tiles[gy * map.width + gx]] === 'water') drawBridge(g, p.x + terrainOff.x, p.y + terrainOff.y);
+      else drawRoadShape(g, p.x + terrainOff.x, p.y + terrainOff.y, null);
     }
     roadsCanvas = c;
   }
@@ -529,7 +551,8 @@
     if (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height) return false;
     if (erasing) return roadSet.has(`${gx},${gy}`);
     const t = map.legend[map.tiles[gy * map.width + gx]];
-    return (t === 'grass' || t === 'sand') && !instanceAt(gx, gy) && !roadSet.has(`${gx},${gy}`);
+    // Gras/Sand = Straße, Wasser = Brücke
+    return (t === 'grass' || t === 'sand' || t === 'water') && !instanceAt(gx, gy) && !roadSet.has(`${gx},${gy}`);
   }
   // Beim Ziehen eine GERADE Linie vom Start zum aktuellen Feld aufbauen
   function roadLineTo(e) {
