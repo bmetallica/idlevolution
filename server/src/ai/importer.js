@@ -112,6 +112,35 @@ function ensureEpochNeeds(pack, registry) {
   }
 }
 
+/**
+ * Entfernt bereits existierende Items (Epochen per id/order, Ressourcen/Gebäude per id),
+ * damit ein sonst gutes Pack nicht komplett abgelehnt wird, nur weil das LLM ein
+ * vorhandenes Item erneut deklariert (häufiges Verhalten kleinerer Modelle).
+ */
+function dropCollisions(pack, registry) {
+  const usedOrders = new Set([...registry.epochs.values()].map((e) => e.order));
+  if (Array.isArray(pack.epochs)) {
+    pack.epochs = pack.epochs.filter((e) => !registry.epochs.has(e.id) && !usedOrders.has(e.order));
+    if (!pack.epochs.length) delete pack.epochs;
+  }
+  if (Array.isArray(pack.resources)) {
+    pack.resources = pack.resources.filter((r) => !registry.resources.has(r.id));
+    if (!pack.resources.length) delete pack.resources;
+  }
+  if (Array.isArray(pack.buildings)) {
+    pack.buildings = pack.buildings.filter((b) => !registry.buildings.has(b.id));
+    if (!pack.buildings.length) delete pack.buildings;
+  }
+  // epochAdvance nur für existierende Epochen OHNE bisherige Aufstiegsbedingung behalten
+  if (pack.epochAdvance) {
+    for (const eid of Object.keys(pack.epochAdvance)) {
+      const ex = registry.epochs.get(eid);
+      if (!ex || ex.advance) delete pack.epochAdvance[eid];
+    }
+    if (!Object.keys(pack.epochAdvance).length) delete pack.epochAdvance;
+  }
+}
+
 function normalizePack(raw) {
   const pack = structuredClone(raw || {});
   pack.schemaVersion = 1;
@@ -226,6 +255,7 @@ async function recordRun(pool, { status, run, accepted, rejected, error }) {
 export async function importPack(rawPack, run, ctx) {
   const registry = ctx.registryHolder.registry;
   const pack = normalizePack(rawPack);
+  dropCollisions(pack, registry); // bereits existierende Items entfernen statt ganzes Pack abzulehnen
   ensureEpochNeeds(pack, registry); // fehlende Epochen-Bedürfnisse sicher ergänzen
   const reject = async (reasons, status = 'rejected') => {
     const file = await writeRejected(ctx.config.dataDir, pack, reasons);

@@ -41,6 +41,8 @@ export function newState(game, registry, map) {
     buildings: {},
     instances: [],
     roads: new Set(),
+    placed: {}, // "x,y" -> 'tree' | 'rock' (vom Spieler gesetzte Deko)
+    cleared: new Set(), // Tiles, deren natürliche Deko (Wald/Fels) entfernt wurde
     mapVersion: 0,
     nextInstanceId: 1,
     map,
@@ -93,6 +95,8 @@ export async function loadState(pool, game, registry) {
       counted: Number(r.done_at_tick) <= tick,
     })),
     roads: new Set(row.extra?.roads || []),
+    placed: row.extra?.placed || {},
+    cleared: new Set(row.extra?.cleared || []),
     mapVersion: row.extra?.mapVersion || 0,
     nextInstanceId: row.extra?.nextInstanceId || 1,
     map,
@@ -128,7 +132,7 @@ export async function saveState(pool, state) {
          current_epoch = EXCLUDED.current_epoch, tick = EXCLUDED.tick,
          population = EXCLUDED.population, last_tick_at = EXCLUDED.last_tick_at,
          extra = EXCLUDED.extra`,
-      [state.epochId, state.tick, state.population, Date.now(), JSON.stringify({ nextInstanceId: state.nextInstanceId, roads: [...(state.roads || [])], mapVersion: state.mapVersion || 0 })]
+      [state.epochId, state.tick, state.population, Date.now(), JSON.stringify({ nextInstanceId: state.nextInstanceId, roads: [...(state.roads || [])], placed: state.placed || {}, cleared: [...(state.cleared || [])], mapVersion: state.mapVersion || 0 })]
     );
     await client.query('DELETE FROM resource_stock');
     for (const [rid, amount] of Object.entries(state.resources)) {

@@ -36,6 +36,13 @@ export const setRoad = (tiles, on) =>
     body: JSON.stringify({ tiles, on }),
   }).then(json);
 
+export const setDeco = (tiles, type, on) =>
+  fetch('/api/deco', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tiles, type, on }),
+  }).then(json);
+
 export const fetchAiLog = () => fetch('/api/ai-log').then(json);
 
 export const disablePack = (packId) =>

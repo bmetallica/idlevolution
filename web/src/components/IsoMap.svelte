@@ -17,8 +17,14 @@
   export let shortages = new Set(); // Ressourcen-IDs im Engpass → Warn-Badges
   export let roads = []; // ["x,y", …] platzierte Straßen
   export let roadMode = false; // Straßen-Malmodus aktiv
+  export let placed = {}; // "x,y" -> 'tree'|'rock' (platzierte Deko)
+  export let cleared = []; // ["x,y", …] gerodete Wald-/Felsfelder
+  export let decoType = null; // 'tree' | 'rock' im Deko-Malmodus
 
   $: roadSet = new Set(roads);
+  $: clearedSet = new Set(cleared);
+  let decoCanvas = null;
+  let _decoSig = null;
   let painting = false;
   let erasing = false; // Straßen-Abriss-Modus (Rechtsklick)
   let roadStart = null; // Startfeld beim Ziehen einer geraden Straße
@@ -63,21 +69,40 @@
         const t = map.legend[map.tiles[gy * map.width + gx]];
         const col = TERRAIN_COLORS[t] || TERRAIN_COLORS.grass;
         drawTile(g, gx, gy, t, col, off, isWater);
-        // Deko: Bäume auf Wald, Felsbrocken auf Fels (deterministisch, statisch mitgebacken)
-        if (t === 'forest' || t === 'rock') {
-          const sc = gridToScreen(gx, gy);
-          const px = sc.x + off.x;
-          const py = sc.y + off.y - col.h;
-          const jx = (tileRand(gx, gy, 1) - 0.5) * TILE_W * 0.3;
-          const jy = (tileRand(gx, gy, 2) - 0.5) * TILE_H * 0.3;
-          const r = 0.85 + tileRand(gx, gy, 3) * 0.4;
-          const seed = Math.floor(tileRand(gx, gy, 5) * 100000);
-          if (t === 'forest') drawTree(g, px + jx, py + jy, r, seed);
-          else if (tileRand(gx, gy, 4) > 0.35) drawRock(g, px + jx, py + jy, r, seed);
-        }
       }
     }
     terrainCanvas = c;
+  }
+
+  // Deko-Ebene (Bäume/Felsen) offscreen backen — respektiert placed + cleared,
+  // sodass Straßen/Gebäude Deko räumen und der Spieler welche setzen kann.
+  function bakeDeco() {
+    if (!map || !terrainW) return;
+    const c = document.createElement('canvas');
+    c.width = terrainW; c.height = terrainH;
+    const g = c.getContext('2d');
+    for (let gy = 0; gy < map.height; gy++) {
+      for (let gx = 0; gx < map.width; gx++) {
+        const key = `${gx},${gy}`;
+        const t = map.legend[map.tiles[gy * map.width + gx]];
+        const p = placed[key];
+        let type = null, hgt = 0;
+        if (p === 'tree') type = 'tree';
+        else if (p === 'rock') type = 'rock';
+        else if (t === 'forest' && !clearedSet.has(key)) { type = 'tree'; hgt = TERRAIN_COLORS.forest.h; }
+        else if (t === 'rock' && !clearedSet.has(key) && tileRand(gx, gy, 4) > 0.35) { type = 'rock'; hgt = TERRAIN_COLORS.rock.h; }
+        if (!type) continue;
+        const sc = gridToScreen(gx, gy);
+        const px = sc.x + terrainOff.x, py = sc.y + terrainOff.y - hgt;
+        const jx = (tileRand(gx, gy, 1) - 0.5) * TILE_W * 0.3;
+        const jy = (tileRand(gx, gy, 2) - 0.5) * TILE_H * 0.3;
+        const r = 0.85 + tileRand(gx, gy, 3) * 0.4;
+        const seed = Math.floor(tileRand(gx, gy, 5) * 100000);
+        if (type === 'tree') drawTree(g, px + jx, py + jy, r, seed);
+        else drawRock(g, px + jx, py + jy, r, seed);
+      }
+    }
+    decoCanvas = c;
   }
 
   function diamondPath(g, cx, cy) {
@@ -219,7 +244,8 @@
 
     if (terrainCanvas) ctx.drawImage(terrainCanvas, -terrainOff.x, -terrainOff.y);
     if (roadsCanvas) ctx.drawImage(roadsCanvas, -terrainOff.x, -terrainOff.y);
-    if (paintSet.size) drawRoadPreview();
+    if (decoCanvas) ctx.drawImage(decoCanvas, -terrainOff.x, -terrainOff.y);
+    if (paintSet.size) drawPaintPreview();
 
     // Hover-/Bau-Vorschau
     if (hover) {
@@ -365,12 +391,18 @@
     }
     roadsCanvas = c;
   }
-  // Live-Vorschau der gerade gemalten/gelöschten Felder (nur während des Ziehens)
-  function drawRoadPreview() {
+  // Live-Vorschau der gerade bearbeiteten Felder (Straße = Erde, Deko = farbige Raute)
+  function drawPaintPreview() {
     for (const key of paintSet) {
       const ci = key.indexOf(',');
-      const p = gridToScreen(+key.slice(0, ci), +key.slice(ci + 1));
-      drawRoadShape(ctx, p.x, p.y, erasing ? 'erase' : 'preview');
+      const gx = +key.slice(0, ci), gy = +key.slice(ci + 1);
+      if (roadMode) {
+        const p = gridToScreen(gx, gy);
+        drawRoadShape(ctx, p.x, p.y, erasing ? 'erase' : 'preview');
+      } else {
+        ctx.fillStyle = erasing ? 'rgba(220,90,80,0.5)' : decoType === 'rock' ? 'rgba(160,160,160,0.55)' : 'rgba(80,200,90,0.5)';
+        fillDiamond(gx, gy);
+      }
     }
   }
 
@@ -508,11 +540,29 @@
     for (const [x, y] of lineTiles(roadStart.gx, roadStart.gy, g.gx, g.gy)) if (tileRoadable(x, y)) ns.add(`${x},${y}`);
     paintSet = ns;
   }
+  // Deko-Malmodus (Freihand)
+  function decoValid(gx, gy) {
+    if (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height) return false;
+    const key = `${gx},${gy}`;
+    const t = map.legend[map.tiles[gy * map.width + gx]];
+    if (erasing) return !!placed[key] || t === 'forest' || t === 'rock'; // entfernbar/rodbar
+    return (t === 'grass' || t === 'sand') && !instanceAt(gx, gy) && !roadSet.has(key) && !placed[key];
+  }
+  function decoPaint(e) {
+    const g = pointerToGrid(e.offsetX, e.offsetY);
+    hover = g.gx >= 0 && g.gy >= 0 && g.gx < map.width && g.gy < map.height ? g : null;
+    if (decoValid(g.gx, g.gy)) paintSet.add(`${g.gx},${g.gy}`);
+  }
   function onPointerDown(e) {
     if (roadMode) {
       painting = true; erasing = e.button === 2;
       roadStart = pointerToGrid(e.offsetX, e.offsetY);
       paintSet = new Set(); roadLineTo(e);
+      return;
+    }
+    if (decoType) {
+      painting = true; erasing = e.button === 2;
+      paintSet = new Set(); decoPaint(e);
       return;
     }
     dragging = true;
@@ -521,7 +571,7 @@
   }
   function onPointerMove(e) {
     if (painting) {
-      roadLineTo(e);
+      if (roadMode) roadLineTo(e); else decoPaint(e);
       return;
     }
     if (dragging) {
@@ -540,10 +590,14 @@
       painting = false;
       const tiles = [...paintSet].map((k) => { const c = k.indexOf(','); return { x: +k.slice(0, c), y: +k.slice(c + 1) }; });
       const wasErasing = erasing;
+      const wasRoad = roadMode;
       paintSet = new Set();
       erasing = false;
       roadStart = null;
-      if (tiles.length) dispatch('road', { tiles, on: !wasErasing });
+      if (tiles.length) {
+        if (wasRoad) dispatch('road', { tiles, on: !wasErasing });
+        else dispatch('deco', { tiles, type: decoType, on: !wasErasing });
+      }
       return;
     }
     dragging = false;
@@ -602,7 +656,12 @@
   // Terrain nur backen, wenn eine WIRKLICH neue Karte eintrifft (nicht pro Frame)
   $: if (map && ctx) {
     const sig = `${map.width}x${map.height}:${map.version ?? map.seed ?? map.tiles?.length}`;
-    if (sig !== _terrainSig) { _terrainSig = sig; buildTerrain(); bakeMini(); _roadsSig = null; }
+    if (sig !== _terrainSig) { _terrainSig = sig; buildTerrain(); bakeMini(); _roadsSig = null; _decoSig = null; }
+  }
+  // Deko neu backen, wenn sich placed/cleared oder die Karte ändern
+  $: if (ctx && terrainW) {
+    const sig = JSON.stringify(placed) + '|' + cleared.join(',') + '|' + (map?.version ?? 0);
+    if (sig !== _decoSig) { _decoSig = sig; bakeDeco(); }
   }
   // Straßen offscreen neu backen — nur wenn sich das Netz WIRKLICH ändert.
   // (Die Komponente kann pro Frame invalidiert werden; ohne diesen Guard würde
@@ -616,7 +675,7 @@
 </script>
 
 <div
-  class="absolute inset-0 overflow-hidden {buildDef || roadMode ? 'cursor-crosshair' : dragging ? 'cursor-grabbing' : 'cursor-grab'}"
+  class="absolute inset-0 overflow-hidden {buildDef || roadMode || decoType ? 'cursor-crosshair' : dragging ? 'cursor-grabbing' : 'cursor-grab'}"
   bind:this={wrap}
 >
   <canvas

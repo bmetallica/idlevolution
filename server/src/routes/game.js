@@ -11,7 +11,7 @@ import {
 import { describeConditions } from '../engine/rules.js';
 import { epochsInOrder } from '../content/loader.js';
 import { logEvent, saveState } from '../engine/state.js';
-import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace } from '../engine/map.js';
+import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
 import { rename, mkdir, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -70,6 +70,8 @@ export default async function gameRoutes(fastify) {
       satisfaction: state.satisfaction ?? 1,
       mapVersion: state.mapVersion || 0,
       roads: [...(state.roads || [])],
+      placed: state.placed || {},
+      cleared: [...(state.cleared || [])],
       logistics: (() => {
         const cov = roadCoverage(state, registry);
         return { roadTiles: state.roads?.size ?? 0, coverage: Math.round(cov * 100) / 100, bonus: Math.round(cov * ROAD_MAX_BONUS * 1000) / 1000 };
@@ -218,6 +220,27 @@ export default async function gameRoutes(fastify) {
       return { ok: true, packId, removedInstances: before - ctx.state.instances.length };
     } catch (err) {
       reply.code(500);
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Deko (Bäume/Felsen) setzen/entfernen. Body: { tiles:[{x,y}], type:'tree'|'rock', on }
+  fastify.post('/api/deco', async (req, reply) => {
+    const { registry } = ctx.registryHolder;
+    const body = req.body || {};
+    const tiles = Array.isArray(body.tiles) ? body.tiles : [{ x: body.x, y: body.y }];
+    const on = body.on !== false;
+    const type = body.type === 'rock' ? 'rock' : 'tree';
+    try {
+      let changed = 0;
+      for (const t of tiles) {
+        try { setDeco(ctx.state.map, ctx.state, registry, Number(t.x), Number(t.y), type, on); changed++; }
+        catch { /* einzelne ungültige Felder überspringen */ }
+      }
+      await saveState(ctx.pool, ctx.state);
+      return { ok: true, changed };
+    } catch (err) {
+      reply.code(400);
       return { ok: false, error: err.message };
     }
   });

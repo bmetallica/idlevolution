@@ -56,9 +56,13 @@ export async function buildExport(ctx) {
     if (r.netPerTick < 0) gaps.push(`Ressource '${r.id}' ist im Mangel (${r.netPerTick}/Tick)`);
   }
   const lastEpoch = epochs[epochs.length - 1];
-  if (lastEpoch && lastEpoch.advance == null) {
+  if (lastEpoch) {
+    const existingIds = epochs.map((e) => `${e.id}(order ${e.order})`).join(', ');
     gaps.push(
-      `Epoche '${lastEpoch.id}' (order ${lastEpoch.order}) ist die letzte — eine Folge-Epoche (order ${lastEpoch.order + 1}) inkl. 'epochAdvance' für '${lastEpoch.id}' kann ergänzt werden`
+      `ACHTUNG Epochen: Es EXISTIEREN BEREITS: ${existingIds}. Diese IDs/orders NIEMALS erneut anlegen. ` +
+      `Eine neue Epoche MUSS order ${lastEpoch.order + 1} und eine komplett NEUE id haben` +
+      (lastEpoch.advance == null ? ` sowie einen 'epochAdvance'-Eintrag für '${lastEpoch.id}'.` : `.`) +
+      ` Wenn dir keine sinnvolle neue Epoche einfällt, lasse "epochs" WEG und ergänze nur Gebäude/Ressourcen.`
     );
   }
 

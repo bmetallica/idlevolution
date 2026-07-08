@@ -103,6 +103,27 @@ export function growIsland(tiles, width, height) {
 export const inBounds = (map, x, y) => x >= 0 && y >= 0 && x < map.width && y < map.height;
 export const terrainAt = (map, x, y) => (inBounds(map, x, y) ? TERRAIN[map.tiles[y * map.width + x]] : null);
 
+const isCleared = (state, key) => {
+  const c = state?.cleared;
+  return c instanceof Set ? c.has(key) : Array.isArray(c) ? c.includes(key) : false;
+};
+
+/**
+ * Für Bebaubarkeit & Nachbarschaft relevantes Terrain unter Berücksichtigung der
+ * Deko-Features: platzierte Bäume zählen als 'forest', platzierte Felsen als 'rock';
+ * gerodeter (cleared) Wald/Fels zählt als 'grass' und wird dadurch bebaubar.
+ */
+export function effectiveTerrain(map, state, x, y) {
+  if (!inBounds(map, x, y)) return null;
+  const key = `${x},${y}`;
+  const placed = state?.placed?.[key];
+  if (placed === 'tree') return 'forest';
+  if (placed === 'rock') return 'rock';
+  const t = terrainAt(map, x, y);
+  if ((t === 'forest' || t === 'rock') && isCleared(state, key)) return 'grass';
+  return t;
+}
+
 /** Grundfläche eines Gebäudes, um `rot` (0-3) gedreht (ungerade rot tauscht w/h). */
 export function footprintOf(def, rot = 0) {
   const w = def.placement?.size?.w ?? 1;
@@ -134,7 +155,7 @@ export function canPlace(map, state, registry, def, x, y, rot = 0) {
   for (let dy = 0; dy < h; dy++) {
     for (let dx = 0; dx < w; dx++) {
       if (!inBounds(map, x + dx, y + dy)) return { ok: false, reason: 'außerhalb der Karte' };
-      const t = terrainAt(map, x + dx, y + dy);
+      const t = effectiveTerrain(map, state, x + dx, y + dy);
       if (!allowed.includes(t)) return { ok: false, reason: `Terrain '${t}' nicht bebaubar (braucht: ${allowed.join('/')})` };
     }
   }
@@ -151,7 +172,7 @@ export function canPlace(map, state, registry, def, x, y, rot = 0) {
     for (let dy = -1; dy <= h; dy++) {
       for (let dx = -1; dx <= w; dx++) {
         if (dx >= 0 && dx < w && dy >= 0 && dy < h) continue; // Footprint selbst
-        if (terrainAt(map, x + dx, y + dy) === terrain) found++;
+        if (effectiveTerrain(map, state, x + dx, y + dy) === terrain) found++;
       }
     }
     if (found < need) return { ok: false, reason: `braucht ${need}× '${terrain}' angrenzend (gefunden: ${found})` };
@@ -173,7 +194,27 @@ export function setRoad(map, state, registry, x, y, on) {
   if (!ROAD_TERRAIN.includes(t)) throw new Error(`Straße nur auf ${ROAD_TERRAIN.join('/')} (hier: ${t})`);
   if (occupiedTiles(state, registry).has(key)) throw new Error('Feld ist bebaut');
   state.roads.add(key);
+  if (state.placed && state.placed[key]) delete state.placed[key]; // Straße räumt Deko
   return { x, y, on: true };
+}
+
+// Bäume/Felsen platzieren (Deko-Layer). type: 'tree' | 'rock'.
+export function setDeco(map, state, registry, x, y, type, on) {
+  if (!inBounds(map, x, y)) throw new Error('außerhalb der Karte');
+  state.placed ??= {};
+  state.cleared ??= new Set();
+  const key = `${x},${y}`;
+  const raw = terrainAt(map, x, y);
+  if (!on) {
+    if (state.placed[key]) { delete state.placed[key]; return { x, y, on: false }; }
+    if (raw === 'forest' || raw === 'rock') { state.cleared.add(key); return { x, y, on: false, cleared: true }; }
+    return { x, y, on: false };
+  }
+  if (raw !== 'grass' && raw !== 'sand') throw new Error('Bäume/Felsen nur auf Wiese/Sand');
+  if (state.roads?.has(key)) throw new Error('Feld ist eine Straße');
+  if (occupiedTiles(state, registry).has(key)) throw new Error('Feld ist bebaut');
+  state.placed[key] = type === 'rock' ? 'rock' : 'tree';
+  return { x, y, on: true, type: state.placed[key] };
 }
 
 /** Ist ein Gebäude an ein Straßenfeld angebunden (4er-Nachbarschaft des Footprints)? */

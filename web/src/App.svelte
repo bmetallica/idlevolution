@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad } from './lib/api.js';
+  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco } from './lib/api.js';
   import { buildChainIndex, computeShortages } from './lib/chains.js';
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
@@ -19,6 +19,7 @@
   let selection = null; // ausgewähltes Feld/Gebäude
   let showChronicle = false;
   let roadMode = false; // Straßen-Malmodus
+  let decoType = null; // 'tree' | 'rock' im Deko-Malmodus
   let mapComp;
 
   let whatsNew = null; // Zusammenfassung neuer KI-Inhalte seit letztem Besuch
@@ -88,7 +89,7 @@
   }
 
   function onSelect(e) {
-    if (buildDef || roadMode) return; // im Bau-/Straßenmodus keine Auswahl
+    if (buildDef || roadMode || decoType) return; // in Bau-/Straßen-/Deko-Modus keine Auswahl
     selection = e.detail;
   }
 
@@ -102,11 +103,22 @@
     }
   }
 
+  async function onDeco(e) {
+    const { tiles, type, on } = e.detail;
+    try {
+      await setDeco(tiles, type, on);
+      await pollState();
+    } catch (err) {
+      showFlash(err.message, false);
+    }
+  }
+
   function onKey(e) {
     if (e.key === 'Escape') {
       buildDef = null;
       selection = null;
       roadMode = false;
+      decoType = null;
     } else if ((e.key === 'r' || e.key === 'R') && buildDef) {
       buildRot = (buildRot + 1) % 4; // Gebäude drehen
     }
@@ -152,12 +164,16 @@
       {buildRot}
       {shortages}
       {roadMode}
+      {decoType}
       roads={state.roads}
+      placed={state.placed}
+      cleared={state.cleared}
       selectedInstance={selection?.instance}
       population={state.population}
       on:place={onPlace}
       on:select={onSelect}
       on:road={onRoad}
+      on:deco={onDeco}
     />
 
     <!-- Obere HUD-Leiste -->
@@ -176,10 +192,28 @@
         class="border rounded px-3 py-1.5 text-sm {roadMode
           ? 'bg-amber-800 border-amber-500 text-amber-100'
           : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
-        on:click={() => { roadMode = !roadMode; buildDef = null; selection = null; }}
+        on:click={() => { roadMode = !roadMode; decoType = null; buildDef = null; selection = null; }}
         title="Straßen bauen — auf Wiese/Sand ziehen"
       >
         🛤️
+      </button>
+      <button
+        class="border rounded px-3 py-1.5 text-sm {decoType === 'tree'
+          ? 'bg-emerald-800 border-emerald-500 text-emerald-100'
+          : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
+        on:click={() => { decoType = decoType === 'tree' ? null : 'tree'; roadMode = false; buildDef = null; selection = null; }}
+        title="Bäume pflanzen (Wald-Nachbarschaft) — ziehen setzt, Rechtsklick entfernt/rodet"
+      >
+        🌲
+      </button>
+      <button
+        class="border rounded px-3 py-1.5 text-sm {decoType === 'rock'
+          ? 'bg-stone-600 border-stone-400 text-stone-100'
+          : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
+        on:click={() => { decoType = decoType === 'rock' ? null : 'rock'; roadMode = false; buildDef = null; selection = null; }}
+        title="Felsen setzen (Fels-Nachbarschaft) — ziehen setzt, Rechtsklick entfernt"
+      >
+        🪨
       </button>
       <button
         class="border rounded px-3 py-1.5 text-sm {showChronicle ? 'bg-amber-800 border-amber-500 text-amber-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
@@ -205,6 +239,10 @@
     {:else if roadMode}
       <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-amber-900/90 border border-amber-600 rounded-full px-4 py-1.5 text-sm whitespace-nowrap">
         🛤️ Straße: ziehen zeichnet eine <b>gerade Linie</b> (links baut · rechts reißt ab) {#if state.logistics?.roadTiles}· {state.logistics.roadTiles} Felder, +{Math.round((state.logistics.bonus || 0) * 100)}%{/if} · <kbd>ESC</kbd> beendet
+      </div>
+    {:else if decoType}
+      <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-amber-900/90 border border-amber-600 rounded-full px-4 py-1.5 text-sm whitespace-nowrap">
+        {decoType === 'tree' ? '🌲 Bäume pflanzen' : '🪨 Felsen setzen'} — ziehen setzt (zählt für {decoType === 'tree' ? 'Wald' : 'Fels'}-Nachbarschaft) · <b>rechts</b> ziehen entfernt{decoType === 'tree' ? '/rodet Wald' : ''} · <kbd>ESC</kbd> beendet
       </div>
     {/if}
 
@@ -269,6 +307,7 @@
         buildDef = e.detail.def;
         selection = null;
         roadMode = false;
+        decoType = null;
         buildRot = 0;
       }}
     />

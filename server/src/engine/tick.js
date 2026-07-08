@@ -3,7 +3,7 @@
 
 import { evaluateConditions, epochOrder } from './rules.js';
 import { epochsInOrder } from '../content/loader.js';
-import { canPlace, roadCoverage } from './map.js';
+import { canPlace, roadCoverage, footprintOf } from './map.js';
 
 // Maximaler Produktionsbonus, wenn alle Gebäude an Straßen angebunden sind.
 export const ROAD_MAX_BONUS = 0.15;
@@ -262,6 +262,11 @@ export function startBuild(registry, state, game, buildingId, x, y, rot = 0) {
   if (inst.counted) {
     const b = (state.buildings[buildingId] ??= { count: 0, workers: 0 });
     b.count += 1;
+  }
+  // Gebäude räumt platzierte Deko auf seinem Grundriss
+  if (state.placed) {
+    const { w: fw, h: fh } = footprintOf(def, rot);
+    for (let dy = 0; dy < fh; dy++) for (let dx = 0; dx < fw; dx++) delete state.placed[`${x + dx},${y + dy}`];
   }
   return { instanceId: inst.id, buildingId, x, y, rot, doneAtTick: inst.doneAtTick };
 }
