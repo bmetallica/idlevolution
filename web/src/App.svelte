@@ -224,6 +224,13 @@
       </button>
       <button
         class="bg-stone-900/90 border border-stone-700 rounded px-3 py-1.5 text-sm hover:border-stone-500"
+        on:click={() => mapComp?.rotateView()}
+        title="Ansicht drehen (90°)"
+      >
+        🔄
+      </button>
+      <button
+        class="bg-stone-900/90 border border-stone-700 rounded px-3 py-1.5 text-sm hover:border-stone-500"
         on:click={() => mapComp?.recenter()}
         title="Zur Siedlung zentrieren"
       >

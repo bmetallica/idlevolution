@@ -42,6 +42,7 @@
   let viewW = 800,
     viewH = 600;
   const camera = { x: 0, y: 0, zoom: 1 };
+  let viewRot = 0; // Ansichts-Drehung 0-3 (je 90°)
   let hover = null; // {gx, gy}
   let dragging = false;
   let dragMoved = false;
@@ -62,13 +63,16 @@
     c.width = w;
     c.height = h;
     const g = c.getContext('2d');
-    const isWater = (x, y) => (x < 0 || y < 0 || x >= map.width || y >= map.height ? true : map.legend[map.tiles[y * map.width + x]] === 'water');
-    // Hinten nach vorne (Painter): Zeilenweise gx+gy aufsteigend ist automatisch korrekt
-    for (let gy = 0; gy < map.height; gy++) {
-      for (let gx = 0; gx < map.width; gx++) {
+    // Wasser-Prüfung in Ansichts-Koordinaten (für Küstenschaum)
+    const isWaterV = (vx, vy) => { const [gx, gy] = rotInv(vx, vy); return (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height) ? true : map.legend[map.tiles[gy * map.width + gx]] === 'water'; };
+    // In Ansichts-Reihenfolge zeichnen (hinten→vorne korrekt, auch gedreht)
+    const N = nSize();
+    for (let vy = 0; vy < N; vy++) {
+      for (let vx = 0; vx < N; vx++) {
+        const [gx, gy] = rotInv(vx, vy);
         const t = map.legend[map.tiles[gy * map.width + gx]];
         const col = TERRAIN_COLORS[t] || TERRAIN_COLORS.grass;
-        drawTile(g, gx, gy, t, col, off, isWater);
+        drawTile(g, vx, vy, t, col, off, isWaterV);
       }
     }
     terrainCanvas = c;
@@ -81,8 +85,10 @@
     const c = document.createElement('canvas');
     c.width = terrainW; c.height = terrainH;
     const g = c.getContext('2d');
-    for (let gy = 0; gy < map.height; gy++) {
-      for (let gx = 0; gx < map.width; gx++) {
+    const N = nSize();
+    for (let vy = 0; vy < N; vy++) {
+      for (let vx = 0; vx < N; vx++) {
+        const [gx, gy] = rotInv(vx, vy);
         const key = `${gx},${gy}`;
         const t = map.legend[map.tiles[gy * map.width + gx]];
         const p = placed[key];
@@ -92,7 +98,7 @@
         else if (t === 'forest' && !clearedSet.has(key)) { type = 'tree'; hgt = TERRAIN_COLORS.forest.h; }
         else if (t === 'rock' && !clearedSet.has(key) && tileRand(gx, gy, 4) > 0.35) { type = 'rock'; hgt = TERRAIN_COLORS.rock.h; }
         if (!type) continue;
-        const sc = gridToScreen(gx, gy);
+        const sc = gridToScreen(vx, vy); // Ansichts-Position
         const px = sc.x + terrainOff.x, py = sc.y + terrainOff.y - hgt;
         const jx = (tileRand(gx, gy, 1) - 0.5) * TILE_W * 0.3;
         const jy = (tileRand(gx, gy, 2) - 0.5) * TILE_H * 0.3;
@@ -187,13 +193,47 @@
   function screenToWorld(sx, sy) {
     return { x: (sx - viewW / 2) / camera.zoom + camera.x, y: (sy - viewH / 2) / camera.zoom + camera.y };
   }
+  // ── Ansichts-Rotation (90°-Schritte), Karte ist quadratisch (N×N) ──
+  const nSize = () => (map ? map.width : 1);
+  function rotFwd(gx, gy) { // Grid → Ansichts-Grid
+    const N = nSize();
+    switch (viewRot & 3) {
+      case 1: return [N - 1 - gy, gx];
+      case 2: return [N - 1 - gx, N - 1 - gy];
+      case 3: return [gy, N - 1 - gx];
+      default: return [gx, gy];
+    }
+  }
+  function rotInv(vx, vy) { // Ansichts-Grid → Grid
+    const N = nSize();
+    switch (viewRot & 3) {
+      case 1: return [vy, N - 1 - vx];
+      case 2: return [N - 1 - vx, N - 1 - vy];
+      case 3: return [N - 1 - vy, vx];
+      default: return [vx, vy];
+    }
+  }
+  // Grid-Tile → Bildschirm-Mittelpunkt (mit Ansichts-Rotation, vor Kamera)
+  function project(gx, gy) { const [vx, vy] = rotFwd(gx, gy); return gridToScreen(vx, vy); }
+  // Ansichts-Grundfläche eines Gebäudes (Bounding-Box in Ansichts-Koordinaten)
+  function buildingViewGeom(x, y, fp) {
+    let minx = Infinity, miny = Infinity;
+    for (let dy = 0; dy < fp.h; dy++) for (let dx = 0; dx < fp.w; dx++) {
+      const [vx, vy] = rotFwd(x + dx, y + dy);
+      if (vx < minx) minx = vx; if (vy < miny) miny = vy;
+    }
+    return { vx0: minx, vy0: miny, w: viewRot & 1 ? fp.h : fp.w, h: viewRot & 1 ? fp.w : fp.h };
+  }
+
   function pointerToGrid(sx, sy) {
     const w = screenToWorld(sx, sy);
-    return screenToGrid(w.x, w.y);
+    const v = screenToGrid(w.x, w.y);
+    const [gx, gy] = rotInv(v.gx, v.gy);
+    return { gx, gy };
   }
-  // Grobes Viewport-Culling anhand des Tile-Mittelpunkts
+  // Grobes Viewport-Culling anhand des Tile-Mittelpunkts (in Ansichts-Koordinaten)
   function inViewport(gx, gy, margin) {
-    const wpt = gridToScreen(gx, gy);
+    const wpt = project(gx, gy);
     const s = worldToScreen(wpt.x, wpt.y);
     return s.x > -margin && s.x < viewW + margin && s.y > -margin * 1.6 && s.y < viewH + margin * 0.7;
   }
@@ -250,14 +290,15 @@
     // Hover-/Bau-Vorschau
     if (hover) {
       if (buildDef) {
-        const { w, h } = footprintOf(buildDef, buildRot);
+        const fp = footprintOf(buildDef, buildRot);
         const check = canPlaceClient(map, instances, defIndex, buildDef, hover.gx, hover.gy, buildRot);
         ctx.fillStyle = check.ok ? 'rgba(80,220,120,0.5)' : 'rgba(230,80,80,0.5)';
-        for (let dy = 0; dy < h; dy++) {
-          for (let dx = 0; dx < w; dx++) fillDiamond(hover.gx + dx, hover.gy + dy);
+        for (let dy = 0; dy < fp.h; dy++) {
+          for (let dx = 0; dx < fp.w; dx++) fillDiamond(hover.gx + dx, hover.gy + dy);
         }
+        const geom = buildingViewGeom(hover.gx, hover.gy, fp);
         drawBuildingSprite(ctx, {
-          def: buildDef, gx: hover.gx, gy: hover.gy, w, h, rot: buildRot,
+          def: buildDef, gx: geom.vx0, gy: geom.vy0, w: geom.w, h: geom.h, rot: (buildRot + viewRot) % 4,
           done: true, alpha: 0.6, time: now, epochOrder: epochIndex[buildDef.epoch] ?? 0,
         });
       } else {
@@ -271,11 +312,16 @@
     const drawables = [];
     for (const inst of instances) {
       const def = defIndex[inst.buildingId];
-      const { w, h } = footprintOf(def || {}, inst.rot ?? 0);
-      if (!inViewport(inst.x + (w - 1) / 2, inst.y + (h - 1) / 2, 220)) continue;
-      drawables.push({ depth: inst.x + inst.y + (w + h) / 2, kind: 'building', inst, def });
+      const fp = footprintOf(def || {}, inst.rot ?? 0);
+      if (!inViewport(inst.x + (fp.w - 1) / 2, inst.y + (fp.h - 1) / 2, 220)) continue;
+      const geom = buildingViewGeom(inst.x, inst.y, fp);
+      drawables.push({ depth: geom.vx0 + geom.vy0 + (geom.w + geom.h) / 2, kind: 'building', inst, def });
     }
-    for (const n of npcs) { if (inViewport(n.x, n.y, 40)) drawables.push({ depth: n.x + n.y, kind: 'npc', n }); }
+    for (const n of npcs) {
+      if (!inViewport(n.x, n.y, 40)) continue;
+      const [vx, vy] = rotFwd(n.x, n.y);
+      drawables.push({ depth: vx + vy, kind: 'npc', n });
+    }
     drawables.sort((a, b) => a.depth - b.depth);
 
     for (const d of drawables) {
@@ -301,8 +347,8 @@
 
   // Mittelpunkt eines Gebäudes (leicht angehoben, damit Linien am Körper andocken)
   function centerOf(inst) {
-    const { w, h } = footprintOf(defIndex[inst.buildingId] || {}, inst.rot ?? 0);
-    const c = gridToScreen(inst.x + (w - 1) / 2, inst.y + (h - 1) / 2);
+    const geom = buildingViewGeom(inst.x, inst.y, footprintOf(defIndex[inst.buildingId] || {}, inst.rot ?? 0));
+    const c = gridToScreen(geom.vx0 + (geom.w - 1) / 2, geom.vy0 + (geom.h - 1) / 2);
     return { x: c.x, y: c.y - 14 };
   }
 
@@ -361,10 +407,12 @@
   }
 
   function fillDiamond(gx, gy) {
-    const pts = tileDiamond(gx, gy);
+    const c = project(gx, gy);
     ctx.beginPath();
-    ctx.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < 4; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.moveTo(c.x, c.y - TILE_H / 2);
+    ctx.lineTo(c.x + TILE_W / 2, c.y);
+    ctx.lineTo(c.x, c.y + TILE_H / 2);
+    ctx.lineTo(c.x - TILE_W / 2, c.y);
     ctx.closePath();
     ctx.fill();
   }
@@ -407,7 +455,7 @@
     for (const key of roadSet) {
       const ci = key.indexOf(',');
       const gx = +key.slice(0, ci), gy = +key.slice(ci + 1);
-      const p = gridToScreen(gx, gy);
+      const p = project(gx, gy);
       if (map.legend[map.tiles[gy * map.width + gx]] === 'water') drawBridge(g, p.x + terrainOff.x, p.y + terrainOff.y);
       else drawRoadShape(g, p.x + terrainOff.x, p.y + terrainOff.y, null);
     }
@@ -419,7 +467,7 @@
       const ci = key.indexOf(',');
       const gx = +key.slice(0, ci), gy = +key.slice(ci + 1);
       if (roadMode) {
-        const p = gridToScreen(gx, gy);
+        const p = project(gx, gy);
         drawRoadShape(ctx, p.x, p.y, erasing ? 'erase' : 'preview');
       } else {
         ctx.fillStyle = erasing ? 'rgba(220,90,80,0.5)' : decoType === 'rock' ? 'rgba(160,160,160,0.55)' : 'rgba(80,200,90,0.5)';
@@ -468,29 +516,29 @@
     if (!map) return;
     const rect = miniCanvas.getBoundingClientRect();
     const gx = (e.clientX - rect.left) / MINI, gy = (e.clientY - rect.top) / MINI;
-    const p = gridToScreen(gx, gy);
+    const p = project(gx, gy);
     camera.x = p.x; camera.y = p.y;
   }
 
   function drawBuilding(inst, def) {
     const rot = inst.rot ?? 0;
-    const { w, h } = footprintOf(def || {}, rot);
+    const geom = buildingViewGeom(inst.x, inst.y, footprintOf(def || {}, rot));
+    const effRot = (rot + viewRot) % 4; // Türseite dreht mit der Ansicht mit
     const eo = epochIndex[def?.epoch] ?? 0;
+    const o = gridToScreen(geom.vx0, geom.vy0);
     if (!inst.done) {
       const buildTime = def?.buildTimeTicks ?? 1;
       const progress = 1 - Math.min(1, (inst.ticksLeft ?? 0) / Math.max(1, buildTime));
-      drawBuildingSprite(ctx, { def: def || {}, gx: inst.x, gy: inst.y, w, h, rot, done: false, progress, time: rt.now });
+      drawBuildingSprite(ctx, { def: def || {}, gx: geom.vx0, gy: geom.vy0, w: geom.w, h: geom.h, rot: effRot, done: false, progress, time: rt.now });
       return;
     }
-    // Fertige Gebäude: gecachtes Bitmap blitten + nur animierte Teile darüber
-    const s = getBuildingSprite(def || {}, eo, w, h, rot);
-    const o = gridToScreen(inst.x, inst.y);
+    const s = getBuildingSprite(def || {}, eo, geom.w, geom.h, effRot);
     ctx.drawImage(s.bitmap || s.canvas, o.x - s.ax, o.y - s.ay);
-    drawBuildingFX(ctx, def || {}, inst.x, inst.y, w, h, eo, rt.now, inst.id, rt.amb.night);
+    drawBuildingFX(ctx, def || {}, geom.vx0, geom.vy0, geom.w, geom.h, eo, rt.now, inst.id, rt.amb.night);
   }
 
   function drawNpc(n) {
-    const c = gridToScreen(n.x, n.y);
+    const c = project(n.x, n.y);
     // Geh-Wackeln, wenn unterwegs
     const bob = n.moving ? Math.abs(Math.sin(rt.now / 90 + n.phase)) * 1.6 : 0;
     // Schatten (bleibt am Boden)
@@ -653,13 +701,17 @@
       gx = done.reduce((s, i) => s + i.x, 0) / done.length;
       gy = done.reduce((s, i) => s + i.y, 0) / done.length;
     }
-    const p = gridToScreen(gx, gy);
+    const p = project(gx, gy);
     camera.x = p.x;
     camera.y = p.y;
   }
 
   export function recenter() {
     centerOnSettlement();
+  }
+  export function rotateView() {
+    viewRot = (viewRot + 1) % 4;
+    centerOnSettlement(); // Siedlung nach dem Drehen wieder zentrieren
   }
 
   onMount(() => {
@@ -678,19 +730,19 @@
 
   // Terrain nur backen, wenn eine WIRKLICH neue Karte eintrifft (nicht pro Frame)
   $: if (map && ctx) {
-    const sig = `${map.width}x${map.height}:${map.version ?? map.seed ?? map.tiles?.length}`;
+    const sig = `${map.width}x${map.height}:${map.version ?? map.seed ?? map.tiles?.length}:${viewRot}`;
     if (sig !== _terrainSig) { _terrainSig = sig; buildTerrain(); bakeMini(); _roadsSig = null; _decoSig = null; }
   }
   // Deko neu backen, wenn sich placed/cleared oder die Karte ändern
   $: if (ctx && terrainW) {
-    const sig = JSON.stringify(placed) + '|' + cleared.join(',') + '|' + (map?.version ?? 0);
+    const sig = JSON.stringify(placed) + '|' + cleared.join(',') + '|' + (map?.version ?? 0) + '|' + viewRot;
     if (sig !== _decoSig) { _decoSig = sig; bakeDeco(); }
   }
   // Straßen offscreen neu backen — nur wenn sich das Netz WIRKLICH ändert.
   // (Die Komponente kann pro Frame invalidiert werden; ohne diesen Guard würde
   //  sonst jedes Frame ein großes Offscreen-Canvas neu alloziert → Latenz/GC.)
   $: if (ctx && terrainW) {
-    const sig = roads.length + '#' + roads.join(',');
+    const sig = roads.length + '#' + roads.join(',') + '|' + viewRot;
     if (sig !== _roadsSig) { _roadsSig = sig; buildRoadsCanvas(); }
   }
   // NPC-Anzahl an Bevölkerung/Gebäude koppeln
