@@ -72,6 +72,11 @@
           <span class="text-stone-300">Netto / Tick</span>
           <span class="font-mono {hover.r.ratePerTick >= 0 ? 'text-emerald-400' : 'text-red-400'}">{fmtRate(hover.r.ratePerTick)}</span>
         </div>
+        {#if hover.r.ratePerTick < -0.001}
+          <div class="mt-1 text-[11px] text-amber-300/90">
+            {#if hover.r.amount < 0.5}⚠ Vorrat leer — die Nachfrage übersteigt die Produktion.{:else}▼ Vorrat schrumpft — Produktion deckt den Verbrauch nicht.{/if}
+          </div>
+        {/if}
       </div>
     {:else}
       <div class="mt-2 pt-1.5 border-t border-stone-800 text-stone-500">

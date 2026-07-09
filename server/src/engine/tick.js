@@ -120,7 +120,9 @@ export function computeResourceFlows(registry, state, game) {
     for (const [rid, rate] of Object.entries(def.production.outputs || {}))
       add(rid, name, rate * b.count * eff * inputFactor * mult);
   }
-  // Bevölkerung: Nahrung (proportional über alle food-Ressourcen)
+  // Bevölkerung: Nahrung (VOLLE Nachfrage, anteilig über alle food-Ressourcen).
+  // Volle Nachfrage statt gedeckeltem Verbrauch, damit Unterdeckung als negative
+  // Rate sichtbar wird (sonst erscheint der Bedarf fälschlich = Produktion).
   const foodNeed = state.population * game.foodPerPopPerTick;
   if (foodNeed > 0) {
     const foods = [];
@@ -131,18 +133,13 @@ export function computeResourceFlows(registry, state, game) {
       if (avail <= 0) continue;
       foods.push([res.id, avail]); total += avail;
     }
-    if (total > 0) {
-      const consumed = Math.min(foodNeed, total);
-      for (const [rid, avail] of foods) add(rid, 'Bevölkerung (Nahrung)', -consumed * (avail / total));
-    }
+    if (total > 0) for (const [rid, avail] of foods) add(rid, 'Bevölkerung (Nahrung)', -foodNeed * (avail / total));
   }
-  // Bevölkerung: Stufen-Bedürfnisse
+  // Bevölkerung: Stufen-Bedürfnisse (volle Nachfrage)
   const epoch = currentEpoch(registry, state);
   for (const [rid, perPop] of Object.entries(epoch?.needs || {})) {
     const need = state.population * perPop;
-    if (need <= 0) continue;
-    const avail = Math.max(0, (state.resources[rid] ?? 0) + (deltas[rid] ?? 0));
-    add(rid, 'Bevölkerung (Bedarf)', -Math.min(avail, need));
+    if (need > 0) add(rid, 'Bevölkerung (Bedarf)', -need);
   }
   return flows;
 }
@@ -160,14 +157,20 @@ export function applyNeeds(registry, state, epoch, target, apply) {
   for (const rid of ids) {
     const need = state.population * (needs[rid] ?? 0);
     if (need <= 0) { sat += 1; continue; }
-    // Im Raten-Modus (apply=false) die bereits in target verbuchte Produktion dieses
-    // Ticks einrechnen — im echten Tick wird der Bedarf NACH der Produktion verbraucht.
-    // Sonst erscheint die Rate fälschlich positiv, obwohl der Bestand bei 0 bleibt.
-    const avail = Math.max(0, (state.resources[rid] ?? 0) + (apply ? 0 : (target?.[rid] ?? 0)));
-    const take = Math.min(avail, need);
-    sat += take / need;
-    if (apply) state.resources[rid] = Math.max(0, state.resources[rid] ?? 0) - take;
-    else if (target) target[rid] = (target[rid] ?? 0) - take;
+    const avail = Math.max(0, state.resources[rid] ?? 0);
+    if (apply) {
+      // Echter Tick: nur so viel verbrauchen wie vorhanden (Vorrat kann nicht negativ werden)
+      const take = Math.min(avail, need);
+      sat += take / need;
+      state.resources[rid] = avail - take;
+    } else if (target) {
+      // Raten-/Anzeige-Modus: VOLLE Nachfrage abziehen (unabhängig vom Vorrat), damit
+      // Unterdeckung als negative Rate erscheint statt als 0 (= Produktion). Zufriedenheit
+      // gegen Vorrat + Produktion dieses Ticks (bereits in target) berechnen.
+      const availWithProd = Math.max(0, avail + (target[rid] ?? 0));
+      sat += Math.min(availWithProd, need) / need;
+      target[rid] = (target[rid] ?? 0) - need;
+    }
   }
   return sat / ids.length;
 }
@@ -193,9 +196,11 @@ function distributeFoodConsumption(registry, state, need, target, dryRun = false
     totalAvail += avail;
   }
   if (totalAvail <= 0) return need; // keine Nahrung → voller Hunger
-  const consumed = Math.min(need, totalAvail);
+  // Raten-Modus: VOLLE Nachfrage anteilig zeigen (Summe = need, macht Unterdeckung sichtbar).
+  // Echter Tick: nur so viel verbrauchen wie vorhanden.
+  const consumed = dryRun ? need : Math.min(need, totalAvail);
   for (const [rid, avail] of foods) {
-    const take = consumed * (avail / totalAvail); // ≤ avail (da consumed ≤ totalAvail)
+    const take = consumed * (avail / totalAvail);
     if (dryRun) target[rid] = (target[rid] ?? 0) - take;
     else state.resources[rid] = avail - take;
   }
