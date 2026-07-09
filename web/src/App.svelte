@@ -8,6 +8,7 @@
   import BuildPalette from './components/BuildPalette.svelte';
   import InfoPanel from './components/InfoPanel.svelte';
   import Chronicle from './components/Chronicle.svelte';
+  import AiAssist from './components/AiAssist.svelte';
 
   let content = null;
   let state = null;
@@ -18,6 +19,7 @@
   let buildRot = 0; // Ausrichtung im Bau-Modus (0-3)
   let selection = null; // ausgewähltes Feld/Gebäude
   let showChronicle = false;
+  let showAssist = false;
   let roadMode = false; // Straßen-Malmodus
   let decoType = null; // 'tree' | 'rock' im Deko-Malmodus
   let mapComp;
@@ -216,6 +218,13 @@
         🪨
       </button>
       <button
+        class="border rounded px-3 py-1.5 text-sm {showAssist ? 'bg-indigo-800 border-indigo-500 text-indigo-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
+        on:click={() => (showAssist = !showAssist)}
+        title="KI-Berater — Fragen zum Spielstand stellen"
+      >
+        💬
+      </button>
+      <button
         class="border rounded px-3 py-1.5 text-sm {showChronicle ? 'bg-amber-800 border-amber-500 text-amber-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
         on:click={() => (showChronicle = !showChronicle)}
         title="KI-Zentrale (Chronik, Läufe, Inhalte)"
@@ -282,6 +291,13 @@
             pollState();
           }}
         />
+      </div>
+    {/if}
+
+    <!-- KI-Berater-Panel -->
+    {#if showAssist}
+      <div class="absolute top-28 right-3 z-30 w-96 max-w-[92vw]">
+        <AiAssist on:close={() => (showAssist = false)} />
       </div>
     {/if}
 

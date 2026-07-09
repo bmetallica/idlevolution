@@ -13,6 +13,7 @@ import { epochsInOrder } from '../content/loader.js';
 import { logEvent, saveState } from '../engine/state.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
+import { askAdvisor } from '../ai/advisor.js';
 import { rename, mkdir, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -43,6 +44,17 @@ export default async function gameRoutes(fastify) {
     const workforce = Math.floor(state.population);
     const assigned = Object.values(state.buildings).reduce((s, b) => s + (b.workers ?? 0), 0);
 
+    // Bevölkerungs-Trend + Grund (damit sichtbar ist, WARUM sie schrumpft)
+    const foodNeed = state.population * game.foodPerPopPerTick;
+    let foodAvail = 0, foodRate = 0;
+    for (const r of registry.resources.values()) if (r.category === 'food') { foodAvail += state.resources[r.id] || 0; foodRate += rates[r.id] || 0; }
+    const sat = state.satisfaction ?? 1;
+    const housingCap = totalHousing(registry, state, game);
+    let popTrend = 'stable', popReason = null;
+    if (foodAvail + 1e-6 < foodNeed) { popTrend = 'shrinking'; popReason = 'Nahrungsmangel — es wird zu wenig Nahrung produziert'; }
+    else if (sat < 0.4) { popTrend = 'shrinking'; popReason = 'Unzufriedenheit — der Bevölkerung fehlen benötigte Güter'; }
+    else if (state.population + 1e-6 < housingCap) { popTrend = 'growing'; popReason = null; }
+
     return {
       tick: state.tick,
       tickSeconds: ctx.config.tickSeconds,
@@ -68,6 +80,14 @@ export default async function gameRoutes(fastify) {
           : [],
       },
       satisfaction: state.satisfaction ?? 1,
+      popTrend,
+      popReason,
+      food: {
+        available: Math.round(foodAvail * 10) / 10,
+        needPerTick: Math.round(foodNeed * 100) / 100,
+        rate: Math.round(foodRate * 1000) / 1000,
+        sufficient: foodAvail + 1e-6 >= foodNeed,
+      },
       mapVersion: state.mapVersion || 0,
       roads: [...(state.roads || [])],
       placed: state.placed || {},
@@ -181,6 +201,19 @@ export default async function gameRoutes(fastify) {
     } catch (err) {
       reply.code(400);
       return { ok: false, error: err.message };
+    }
+  });
+
+  // KI-Berater: beantwortet Spielerfragen anhand des Spielstands (lokales LLM)
+  fastify.post('/api/assist', async (req, reply) => {
+    const question = (req.body?.question || '').toString().slice(0, 500).trim();
+    if (!question) { reply.code(400); return { ok: false, error: 'Frage fehlt' }; }
+    try {
+      const answer = await askAdvisor(question, ctx);
+      return { ok: true, answer };
+    } catch (err) {
+      reply.code(502);
+      return { ok: false, error: 'Berater nicht erreichbar: ' + err.message };
     }
   });
 

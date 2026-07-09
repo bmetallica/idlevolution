@@ -161,6 +161,9 @@ export function runTick(registry, state, game) {
   const unmet = distributeFoodConsumption(registry, state, foodNeed, null, false);
   const satisfaction = applyNeeds(registry, state, epochNow, null, /* apply */ true);
   state.satisfaction = satisfaction;
+  // Verbleibender Nahrungsvorrat NACH Verbrauch — Puffer für weiteres Wachstum
+  let foodStock = 0;
+  for (const res of registry.resources.values()) if (res.category === 'food') foodStock += Math.max(0, state.resources[res.id] ?? 0);
   const housing = totalHousing(registry, state, game);
   const growth = epochNow?.modifiers?.populationGrowth ?? 0.01;
   if (unmet > 0.000001) {
@@ -169,8 +172,9 @@ export function runTick(registry, state, game) {
   } else if (satisfaction < 0.4) {
     // Güter fehlen → Unzufriedenheit, leichte Abwanderung (skaliert mit Fehlbetrag)
     state.population = Math.max(1, state.population * (1 - game.popDeclineRate * (0.4 - satisfaction)));
-  } else if (state.population < housing) {
-    // Wachstum, durch Zufriedenheit gebremst (0.4→40 %, 1.0→100 % der Wachstumsrate)
+  } else if (state.population < housing && foodStock > foodNeed) {
+    // Wachstum nur bei Nahrungs-Puffer (verhindert Überschwingen in die Hungersnot);
+    // durch Zufriedenheit gebremst (0.4→40 %, 1.0→100 % der Wachstumsrate)
     const g = growth * (0.4 + 0.6 * satisfaction);
     state.population = Math.min(housing, state.population + Math.max(0.01, state.population * g));
   }

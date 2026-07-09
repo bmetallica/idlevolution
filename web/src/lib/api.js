@@ -43,6 +43,13 @@ export const setDeco = (tiles, type, on) =>
     body: JSON.stringify({ tiles, type, on }),
   }).then(json);
 
+export const askAssist = (question) =>
+  fetch('/api/assist', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question }),
+  }).then(json);
+
 export const fetchAiLog = () => fetch('/api/ai-log').then(json);
 
 export const disablePack = (packId) =>

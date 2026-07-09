@@ -8,9 +8,10 @@
 
 <div class="px-4 py-2 bg-stone-950/90 backdrop-blur border-b border-stone-800">
   <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
-    <span class="flex items-center gap-1" title="Bevölkerung / Wohnraum">
+    <span class="flex items-center gap-1 {state.popTrend === 'shrinking' ? 'text-red-400' : ''}" title={state.popReason || 'Bevölkerung / Wohnraum'}>
       <span>👥</span>
       <span class="font-mono">{Math.floor(state.population)}/{state.housing}</span>
+      {#if state.popTrend === 'shrinking'}<span>📉</span>{:else if state.popTrend === 'growing'}<span class="text-emerald-500">📈</span>{/if}
     </span>
     <span class="flex items-center gap-1" title="Freie Arbeiter">
       <span>💪</span>

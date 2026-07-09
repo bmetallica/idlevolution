@@ -31,6 +31,12 @@ services:
       PERSIST_EVERY_TICKS: ${PERSIST_EVERY_TICKS:-12}
       OFFLINE_CAP_HOURS: ${OFFLINE_CAP_HOURS:-24}
       AI_IMPORT_TOKEN: ${AI_IMPORT_TOKEN:?AI_IMPORT_TOKEN muss in .env gesetzt sein}
+      # LLM für den In-Game-Berater (/api/assist)
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:8080}
+      LLM_MODEL: ${LLM_MODEL:-gemma4-12b}
+      LLM_CTX: ${LLM_CTX:-32768}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-12288}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
     volumes:
       - ./data:/data
     healthcheck:

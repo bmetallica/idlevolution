@@ -35,6 +35,9 @@
       <span class="text-xs text-stone-300 border-l border-stone-700 pl-3">👥 {state.epoch.tier.de || state.epoch.tier}</span>
     {/if}
     <span class="text-xs {satClass}" title="Zufriedenheit der Bevölkerung">😊 {Math.round(sat * 100)}%</span>
+    {#if state.popTrend === 'shrinking'}
+      <span class="text-xs text-red-100 bg-red-800/80 border border-red-600 rounded px-2 py-0.5 font-medium" title={state.popReason}>📉 schrumpft</span>
+    {/if}
     {#if collapsed && state.epoch.next}
       <span class="text-[11px] text-stone-500 truncate hidden sm:inline">→ {state.epoch.next.name?.de || state.epoch.next.id}</span>
     {/if}
@@ -88,6 +91,19 @@
             <span class="font-mono">{n.have}/{n.need}</span> {n.ok ? '✓' : '⚠️'}
           </span>
         {/each}
+      </div>
+    {/if}
+
+    <!-- Schrumpf-Grund + Nahrungsdetails -->
+    {#if state.popTrend === 'shrinking'}
+      <div class="mt-2 pt-2 border-t border-red-900/60 text-xs text-red-200">
+        <div>📉 <b>Bevölkerung schrumpft:</b> {state.popReason}.</div>
+        {#if state.food && !state.food.sufficient}
+          <div class="mt-1 text-red-300/90">
+            🍖 Nahrung: <span class="font-mono">{state.food.available}</span> vorhanden, Bedarf <span class="font-mono">{state.food.needPerTick}</span>/Tick, Produktion <span class="font-mono">{state.food.rate}</span>/Tick.
+            <br>→ Baue/verstärke Nahrungsgebäude (Sammlerhütte, Garten, Fischer) und weise ihnen Arbeiter zu.
+          </div>
+        {/if}
       </div>
     {/if}
   {/if}

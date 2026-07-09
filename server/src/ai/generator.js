@@ -177,7 +177,7 @@ function extractJSON(text) {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-async function chatCompletion(llm, messages, responseFormat) {
+export async function chatCompletion(llm, messages, responseFormat) {
   const body = {
     model: llm.model,
     messages,
