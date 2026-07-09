@@ -268,7 +268,12 @@
   // Reaktivität (inkl. buildRoadsCanvas) jeden Frame → massive Latenz.
   // WICHTIG: auch `raf` hier ablegen — eine reaktive `let raf` würde bei jeder
   // Zuweisung pro Frame die ganze Komponente invalidieren.
-  const rt = { now: 0, amb: { sun: 1, night: 0, golden: 0 }, raf: 0 };
+  // Drossel-Konstanten (CPU-Optimierung): Render ~30 fps, NPC-Sim ~20 fps, Minimap ~5 fps.
+  const SIM_STEP_MS = 1000 / 60; // Referenz-Takt, an dem die NPC-Geschwindigkeit kalibriert ist
+  const RENDER_MS = 1000 / 30;
+  const NPC_MS = 1000 / 20;
+  const MINI_MS = 200;
+  const rt = { now: 0, amb: { sun: 1, night: 0, golden: 0 }, raf: 0, lastRender: 0, lastNpc: 0, lastMini: 0, lastCamKey: '' };
   function render() {
     if (!ctx) return;
     rt.now = performance.now();
@@ -347,7 +352,10 @@
       ctx.fillStyle = `rgba(255, 150, 60, ${amb.golden * 0.13})`;
       ctx.fillRect(0, 0, viewW, viewH);
     }
-    drawMini();
+    // Minimap seltener neu zeichnen (ändert sich kaum) — spart eine Voll-Karten-
+    // Neuzeichnung pro Frame. Bei Kamerabewegung sofort aktualisieren (Ausschnittsrahmen).
+    const camKey = `${camera.x}|${camera.y}|${camera.zoom}`;
+    if (now - rt.lastMini >= MINI_MS || camKey !== rt.lastCamKey) { rt.lastMini = now; rt.lastCamKey = camKey; drawMini(); }
   }
 
   // Mittelpunkt eines Gebäudes (leicht angehoben, damit Linien am Körper andocken)
@@ -571,10 +579,22 @@
   }
 
   // ── Animationsschleife ──
-  function loop() {
-    npcSystem.step(instances, defIndex, roadSet);
-    render();
+  // rAF feuert mit voller Bildwiederholrate (60/120/144 Hz); Arbeit wird gedrosselt:
+  // Render auf ~30 fps, NPC-Simulation auf ~20 fps (zeitskaliert), Minimap ~5 fps.
+  function loop(ts) {
     rt.raf = requestAnimationFrame(loop);
+    if (!ts) ts = performance.now();
+    // NPC-Simulation gedrosselt, Bewegung zeit-skaliert → konstante Geschwindigkeit
+    if (ts - rt.lastNpc >= NPC_MS - 1) {
+      const mult = Math.min(4, (ts - rt.lastNpc) / SIM_STEP_MS);
+      rt.lastNpc = ts;
+      npcSystem.step(instances, defIndex, roadSet, mult);
+    }
+    // Render-Deckel
+    if (ts - rt.lastRender >= RENDER_MS - 1) {
+      rt.lastRender = ts;
+      render();
+    }
   }
 
   // ── Eingabe ──
@@ -726,6 +746,7 @@
     buildTerrain();
     centerOnSettlement();
     window.addEventListener('resize', resize);
+    rt.lastNpc = rt.lastRender = performance.now();
     loop();
   });
   onDestroy(() => {

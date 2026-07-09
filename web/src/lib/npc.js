@@ -91,11 +91,13 @@ export function createNpcSystem() {
     }
   }
 
-  function step(instances, defIndex, roads) {
+  // `mult` = Anzahl der Basis-Schritte (60-fps-Äquivalent), die dieser Aufruf abdeckt.
+  // So bleibt die Lauf-/Pausengeschwindigkeit konstant, auch wenn seltener gesteppt wird.
+  function step(instances, defIndex, roads, mult = 1) {
     const roles = spotsByRole(instances, defIndex);
     if (roles.any.length === 0) return npcs;
     for (const n of npcs) {
-      if (n.pause > 0) { n.pause -= 1; n.moving = false; continue; }
+      if (n.pause > 0) { n.pause -= mult; n.moving = false; continue; }
       const dx = n.tx - n.x, dy = n.ty - n.y;
       const dist = Math.hypot(dx, dy);
       if (dist < 0.05) {
@@ -108,8 +110,9 @@ export function createNpcSystem() {
         }
         n.moving = false;
       } else {
-        n.x += (dx / dist) * n.speed;
-        n.y += (dy / dist) * n.speed;
+        const move = Math.min(dist, n.speed * mult); // nicht über den Wegpunkt hinausschießen
+        n.x += (dx / dist) * move;
+        n.y += (dy / dist) * move;
         n.moving = true;
       }
     }
