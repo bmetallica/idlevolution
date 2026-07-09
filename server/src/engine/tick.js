@@ -106,22 +106,32 @@ export function applyNeeds(registry, state, epoch, target, apply) {
   return sat / ids.length;
 }
 
-/** Verteilt den Nahrungsbedarf auf alle Ressourcen der Kategorie 'food'. */
+/**
+ * Deckt den Nahrungsbedarf PROPORTIONAL aus allen Ressourcen der Kategorie 'food'
+ * (z.B. Getreide UND Fisch), gewichtet nach Vorrat. Früher wurde streng der
+ * Reihe nach entnommen — dadurch wurde die erste Nahrungsquelle nie leer und
+ * spätere (Fisch) häuften sich nutzlos an. Proportional werden alle gemeinsam
+ * verbraucht, sodass jede Nahrungsquelle real zur Versorgung beiträgt.
+ */
 function distributeFoodConsumption(registry, state, need, target, dryRun = false) {
-  let remaining = need;
+  if (need <= 0) return 0;
+  const foods = [];
+  let totalAvail = 0;
   for (const res of registry.resources.values()) {
-    if (res.category !== 'food' || remaining <= 0) continue;
+    if (res.category !== 'food') continue;
     const avail = Math.max(0, state.resources[res.id] ?? 0);
-    const take = Math.min(avail, remaining);
-    if (dryRun) {
-      target[res.id] = (target[res.id] ?? 0) - take;
-      remaining -= take;
-    } else {
-      state.resources[res.id] = avail - take;
-      remaining -= take;
-    }
+    if (avail <= 0) continue;
+    foods.push([res.id, avail]);
+    totalAvail += avail;
   }
-  return remaining; // > 0 → Hunger
+  if (totalAvail <= 0) return need; // keine Nahrung → voller Hunger
+  const consumed = Math.min(need, totalAvail);
+  for (const [rid, avail] of foods) {
+    const take = consumed * (avail / totalAvail); // ≤ avail (da consumed ≤ totalAvail)
+    if (dryRun) target[rid] = (target[rid] ?? 0) - take;
+    else state.resources[rid] = avail - take;
+  }
+  return need - consumed; // > 0 → Hunger
 }
 
 /**
