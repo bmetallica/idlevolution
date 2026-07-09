@@ -85,6 +85,69 @@ export function computeNetRates(registry, state, game) {
 }
 
 /**
+ * Schlüsselt pro Ressource die Zu-/Abflüsse pro Tick auf (Produzenten, verbrauchende
+ * Gebäude, Bevölkerungs-Bedarf) — für Tooltip-Transparenz. Spiegelt exakt die Reihenfolge
+ * und Formeln von computeProductionDeltas + computeNetRates, sodass die Summe der Einträge
+ * der angezeigten Netto-Rate entspricht. Rückgabe: { rid: [{ label, amount }] } (amount: +zu/-ab).
+ */
+export function computeResourceFlows(registry, state, game) {
+  const mult = productionMultiplier(registry, state);
+  const flows = {};
+  const deltas = {}; // laufende Verfügbarkeit wie in computeProductionDeltas (Input-Limitierung)
+  const add = (rid, label, amount) => {
+    if (Math.abs(amount) < 1e-9) return;
+    (flows[rid] ??= []).push({ label, amount: Math.round(amount * 1000) / 1000 });
+    deltas[rid] = (deltas[rid] ?? 0) + amount;
+  };
+  for (const [id, b] of Object.entries(state.buildings)) {
+    const def = registry.buildings.get(id);
+    if (!def?.production || b.count <= 0) continue;
+    const needWorkers = (def.workers ?? 0) * b.count;
+    const eff = needWorkers > 0 ? Math.min(1, (b.workers ?? 0) / needWorkers) : 1;
+    if (eff <= 0) continue;
+    let inputFactor = 1;
+    for (const [rid, rate] of Object.entries(def.production.inputs || {})) {
+      const need = rate * b.count * eff;
+      if (need <= 0) continue;
+      const avail = Math.max(0, (state.resources[rid] ?? 0) + (deltas[rid] ?? 0));
+      inputFactor = Math.min(inputFactor, avail / need);
+    }
+    inputFactor = Math.max(0, Math.min(1, inputFactor));
+    if (inputFactor <= 0) continue;
+    const name = def.name?.de || id;
+    for (const [rid, rate] of Object.entries(def.production.inputs || {}))
+      add(rid, name, -rate * b.count * eff * inputFactor);
+    for (const [rid, rate] of Object.entries(def.production.outputs || {}))
+      add(rid, name, rate * b.count * eff * inputFactor * mult);
+  }
+  // Bevölkerung: Nahrung (proportional über alle food-Ressourcen)
+  const foodNeed = state.population * game.foodPerPopPerTick;
+  if (foodNeed > 0) {
+    const foods = [];
+    let total = 0;
+    for (const res of registry.resources.values()) {
+      if (res.category !== 'food') continue;
+      const avail = Math.max(0, (state.resources[res.id] ?? 0) + (deltas[res.id] ?? 0));
+      if (avail <= 0) continue;
+      foods.push([res.id, avail]); total += avail;
+    }
+    if (total > 0) {
+      const consumed = Math.min(foodNeed, total);
+      for (const [rid, avail] of foods) add(rid, 'Bevölkerung (Nahrung)', -consumed * (avail / total));
+    }
+  }
+  // Bevölkerung: Stufen-Bedürfnisse
+  const epoch = currentEpoch(registry, state);
+  for (const [rid, perPop] of Object.entries(epoch?.needs || {})) {
+    const need = state.population * perPop;
+    if (need <= 0) continue;
+    const avail = Math.max(0, (state.resources[rid] ?? 0) + (deltas[rid] ?? 0));
+    add(rid, 'Bevölkerung (Bedarf)', -Math.min(avail, need));
+  }
+  return flows;
+}
+
+/**
  * Verbraucht die Güter-Bedürfnisse der aktuellen Bevölkerung (epoch.needs) und
  * liefert die Zufriedenheit 0..1 (Anteil gedeckter Bedürfnisse). Ohne Bedürfnisse = 1.
  * data-driven: Die KI definiert je Epoche neue Bedürfnisse und erzwingt so neue Ketten.

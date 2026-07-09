@@ -7,6 +7,7 @@ import {
   demolish,
   assignWorkers,
   currentEpoch,
+  computeResourceFlows,
 } from '../engine/tick.js';
 import { describeConditions } from '../engine/rules.js';
 import { epochsInOrder } from '../content/loader.js';
@@ -115,12 +116,16 @@ export default async function gameRoutes(fastify) {
       population: state.population,
       housing: totalHousing(registry, state, game),
       workers: { total: workforce, assigned, idle: Math.max(0, workforce - assigned) },
-      resources: [...registry.resources.values()].map((r) => ({
-        id: r.id,
-        amount: state.resources[r.id] ?? 0,
-        capacity: r.storable === false ? null : storageCapacity(registry, state, game, r.id),
-        ratePerTick: rates[r.id] ?? 0,
-      })),
+      resources: (() => {
+        const flows = computeResourceFlows(registry, state, game);
+        return [...registry.resources.values()].map((r) => ({
+          id: r.id,
+          amount: state.resources[r.id] ?? 0,
+          capacity: r.storable === false ? null : storageCapacity(registry, state, game, r.id),
+          ratePerTick: rates[r.id] ?? 0,
+          flow: (flows[r.id] || []).sort((a, b) => b.amount - a.amount), // Zuflüsse zuerst
+        }));
+      })(),
       buildings: Object.entries(state.buildings).map(([id, b]) => ({
         id,
         count: b.count,

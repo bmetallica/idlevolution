@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { loadRegistry } from '../src/content/loader.js';
-import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity } from '../src/engine/tick.js';
+import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity, computeNetRates, computeResourceFlows } from '../src/engine/tick.js';
 import { evaluateConditions } from '../src/engine/rules.js';
 import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '../src/engine/map.js';
 
@@ -82,6 +82,30 @@ test('Bevölkerung bremst sich bei Güter-Mangel selbst und kollabiert nicht auf
   assert.equal(state.buildings.gatherer_hut.workers, 40, 'Nahrungs-Arbeiter dürfen bei Rückgang nicht abgebaut werden');
   assert.ok(state.resources.food > 0, 'Nahrung darf nicht kollabieren');
   assert.ok(state.satisfaction >= 0.38, `Zufriedenheit am Gleichgewicht zu niedrig (${state.satisfaction.toFixed(2)})`);
+});
+
+test('Fluss-Aufschlüsselung summiert sich zur Netto-Rate', () => {
+  const bigStore = { ...game, baseStorage: 1e9 };
+  const state = freshState({
+    epochId: 'bronze_age',
+    population: 80,
+    resources: { wood: 1e6, stone: 1e6, food: 1e5, planks: 0, tools: 0 },
+    buildings: {
+      gatherer_hut: { count: 5, workers: 10 },
+      sawmill: { count: 2, workers: 4 },   // verbraucht wood, produziert planks
+      toolmaker: { count: 2, workers: 4 },  // verbraucht planks+stone, produziert tools
+    },
+  });
+  const rates = computeNetRates(registry, state, bigStore);
+  const flows = computeResourceFlows(registry, state, bigStore);
+  for (const rid of ['wood', 'planks', 'tools', 'food']) {
+    const sum = (flows[rid] || []).reduce((a, f) => a + f.amount, 0);
+    assert.ok(Math.abs(sum - (rates[rid] ?? 0)) < 1e-6, `${rid}: Summe ${sum} ≠ Netto ${rates[rid]}`);
+  }
+  // planks werden vom Sägewerk erzeugt UND vom Toolmaker verbraucht → beide Einträge vorhanden
+  const plankLabels = (flows.planks || []).map((f) => f.label);
+  assert.ok(plankLabels.some((l) => /Sägewerk/.test(l)), 'Produzent fehlt');
+  assert.ok(plankLabels.some((l) => /Werkzeugmacher|Toolmaker|Werkzeug/i.test(l)) || (flows.planks || []).some((f) => f.amount < 0), 'Verbraucher fehlt');
 });
 
 test('Tick: Lagerkapazität begrenzt Bestände', () => {
