@@ -178,8 +178,9 @@
       on:deco={onDeco}
     />
 
-    <!-- Obere HUD-Leiste -->
-    <div class="absolute top-0 inset-x-0 z-30">
+    <!-- Obere HUD-Leiste (über der Werkzeugleiste, damit die Ressourcen-Tooltips
+         nicht von den Buttons überlagert werden) -->
+    <div class="absolute top-0 inset-x-0 z-40">
       <ResourceBar {state} {resourceIndex} />
     </div>
 
