@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadRegistry } from '../src/content/loader.js';
+import { loadRegistry, dedupeResourceIcons } from '../src/content/loader.js';
 import { validatePack, validateStructure } from '../src/content/validator.js';
 import { balancePack } from '../src/content/balancer.js';
 import { pruneUnreachable } from '../src/ai/importer.js';
@@ -63,6 +63,23 @@ test('pruneUnreachable: kaskadiert (fällt der einzige Produzent, fällt auch de
   const dropped = pruneUnreachable(pack, registry);
   assert.equal(pack.buildings, undefined); // alle gestrichen
   assert.equal(dropped.length, 2);
+});
+
+test('dedupeResourceIcons: eindeutige Icons, base behält Vorrang, thematisch', () => {
+  const reg = { resources: new Map([
+    ['stone', { id: 'stone', name: { de: 'Stein' }, category: 'raw', icon: '🪨' }],       // base zuerst → behält
+    ['iron_ore', { id: 'iron_ore', name: { de: 'Eisenerz' }, category: 'raw', icon: '🪨' }], // Kollision → thematisch (Erz)
+    ['clay', { id: 'clay', name: { de: 'Ton' }, category: 'raw', icon: '' }],               // fehlt
+    ['pottery', { id: 'pottery', name: { de: 'Töpferwaren' }, category: 'processed' }],      // fehlt
+  ]) };
+  dedupeResourceIcons(reg);
+  const icons = [...reg.resources.values()].map((r) => r.icon);
+  assert.equal(new Set(icons).size, icons.length, 'Icons müssen eindeutig sein');
+  assert.ok(icons.every((i) => i && i.length > 0), 'kein leeres Icon');
+  assert.equal(reg.resources.get('stone').icon, '🪨', 'base behält sein Icon');
+  assert.notEqual(reg.resources.get('iron_ore').icon, '🪨', 'Kollision wird aufgelöst');
+  // Erz-Thema greift
+  assert.ok(['⛏️', '⛰️', '🧲'].includes(reg.resources.get('iron_ore').icon), 'Eisenerz thematisch');
 });
 
 test('Validator: strukturell kaputtes Pack wird abgelehnt', () => {

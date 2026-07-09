@@ -71,7 +71,63 @@ export async function loadRegistry(dataDir, log = console, opts = {}) {
       mergePack(registry, pack, file);
     }
   }
+  dedupeResourceIcons(registry);
   return registry;
+}
+
+// Themen-Pools: passendes Icon je nach Name/Kategorie einer Ressource. Innerhalb
+// eines Themas wird das erste noch freie Icon vergeben (distinkt + thematisch).
+const ICON_THEMES = [
+  { re: /erz|ore|mineral|gestein/i, icons: ['⛏️', '⛰️', '🧲'] },
+  { re: /barren|ingot|\bbar\b|metall|kupfer|copper|bronze|zinn|tin/i, icons: ['🟧', '🟨', '🟫', '🔶'] },
+  { re: /\bton\b|clay|lehm/i, icons: ['🟤', '🧱'] },
+  { re: /keramik|ceramic|töpfer|pottery|porzellan|vase|krug|geschirr/i, icons: ['🍶', '🫖', '🏺'] },
+  { re: /stoff|tuch|cloth|textil|wolle|wool|leinen|linen|seide|silk|garn|faden/i, icons: ['🧵', '🧶'] },
+  { re: /getreide|grain|korn|mehl|flour|brot|bread|weizen|wheat/i, icons: ['🌾', '🍞'] },
+  { re: /käse|cheese|milch|milk|obst|fruit|fleisch|meat|gemüse/i, icons: ['🧀', '🍎', '🥩'] },
+  { re: /wein|wine|bier|beer|kaffee|coffee|met|rum|schnaps|alk/i, icons: ['🍷', '🍺', '☕'] },
+  { re: /salz|salt|gewürz|spice|zucker|sugar/i, icons: ['🧂', '🧉'] },
+  { re: /schmuck|jewel|edelstein|gem|diamant|diamond|luxus|luxury/i, icons: ['💎', '🔷', '🔸'] },
+  { re: /gold/i, icons: ['🥇', '👑'] },
+  { re: /silber|silver/i, icons: ['🥈', '🍽️'] },
+  { re: /schwert|sword|waffe|weapon|klinge|blade/i, icons: ['🗡️', '⚔️'] },
+  { re: /bogen|bow|pfeil|arrow/i, icons: ['🏹'] },
+  { re: /rüstung|armor|schild|shield|harnisch/i, icons: ['🛡️', '🥼'] },
+  { re: /glas|glass|fenster/i, icons: ['🪟', '🧊'] },
+  { re: /öl|oil|kohle|coal|treibstoff|fuel|teer|pech/i, icons: ['🛢️', '🪔', '🕯️'] },
+  { re: /papier|paper|buch|book|schrift/i, icons: ['📜', '📖'] },
+  { re: /leder|leather|fell|pelz|fur|haut/i, icons: ['🟫', '🧳'] },
+  { re: /medizin|medic|kräuter|herb|trank|potion/i, icons: ['💊', '🧪'] },
+  { re: /werkzeug|tool|gerät|instrument/i, icons: ['🔧', '🪛', '⚒️'] },
+];
+// Neutrale Reserve, falls kein Thema passt oder alle Themen-Icons vergeben sind.
+const FALLBACK_ICONS = [
+  '🟡', '🟢', '🔵', '🟣', '🟥', '🟩', '🟦', '🟪', '🔷', '🔹', '🧴', '🔗', '⚓', '🪝', '🧭',
+  '🔭', '⏳', '🪙', '💰', '📿', '🧿', '🪬', '🗿', '🪵', '🪨', '🎗️', '🏆', '🥉', '🪞', '🔮',
+];
+
+/**
+ * Sorgt für eindeutige Ressourcen-Icons. Basis-/zuerst geladene Ressourcen behalten
+ * ihr Icon; fehlende oder kollidierende Icons (typisch bei KI-generierten Ressourcen)
+ * bekommen ein thematisch passendes, freies Fallback — stabil über Reloads.
+ */
+export function dedupeResourceIcons(registry) {
+  const used = new Set();
+  const needFix = [];
+  // Runde 1: erstes Vorkommen jedes Icons reservieren (Reihenfolge = base zuerst)
+  for (const r of registry.resources.values()) {
+    const ic = (r.icon || '').trim();
+    if (ic && !used.has(ic)) { r.icon = ic; used.add(ic); }
+    else needFix.push(r); // fehlt oder Doppelbelegung
+  }
+  // Runde 2: thematisch passendes, freies Icon vergeben
+  for (const r of needFix) {
+    const key = `${r.id} ${r.name?.de || ''} ${r.name?.en || ''} ${r.category || ''}`;
+    const themed = ICON_THEMES.find((t) => t.re.test(key))?.icons || [];
+    const pick = [...themed, ...FALLBACK_ICONS].find((c) => !used.has(c));
+    r.icon = pick || '📦';
+    used.add(r.icon);
+  }
 }
 
 /** Epochen sortiert nach order. */
