@@ -60,6 +60,30 @@ test('Tick: Sägewerk steht still ohne Holz-Input', () => {
   assert.equal(state.resources.planks, 0);
 });
 
+test('Bevölkerung bremst sich bei Güter-Mangel selbst und kollabiert nicht auf 1', () => {
+  // bronze_age verlangt tools (0.01/Kopf/Tick). Ein Toolmaker produziert 0.15/Tick —
+  // bei 100 Einwohnern (Bedarf 1.0) deutlich zu wenig → Unzufriedenheit → Rückgang.
+  // Erwartung: pendelt sich beim tragfähigen Niveau ein (~0.15/(0.4*0.01)=37.5),
+  // NICHT Kollaps auf 1, und die Nahrungskette wird nicht abgebaut.
+  // Großes Lager isoliert die Bevölkerungs-Dynamik von Zulieferung/Lager-Cap.
+  const bigStore = { ...game, baseStorage: 1e9 };
+  const state = freshState({
+    epochId: 'bronze_age',
+    population: 100,
+    resources: { wood: 0, stone: 1e6, food: 1e5, planks: 1e6, tools: 0 },
+    buildings: {
+      gatherer_hut: { count: 20, workers: 40 }, // Nahrung 12/Tick ≫ Bedarf → nie Hunger
+      toolmaker: { count: 1, workers: 2 },       // tools 0.15/Tick ≪ Bedarf → Unzufriedenheit
+    },
+  });
+  for (let i = 0; i < 4000; i++) runTick(registry, state, bigStore);
+  assert.ok(state.population > 20, `Bevölkerung kollabierte auf ${state.population.toFixed(1)}`);
+  assert.ok(state.population < 100, `Bevölkerung hätte schrumpfen müssen (${state.population.toFixed(1)})`);
+  assert.equal(state.buildings.gatherer_hut.workers, 40, 'Nahrungs-Arbeiter dürfen bei Rückgang nicht abgebaut werden');
+  assert.ok(state.resources.food > 0, 'Nahrung darf nicht kollabieren');
+  assert.ok(state.satisfaction >= 0.38, `Zufriedenheit am Gleichgewicht zu niedrig (${state.satisfaction.toFixed(2)})`);
+});
+
 test('Tick: Lagerkapazität begrenzt Bestände', () => {
   const state = freshState({
     resources: { wood: 199.9, stone: 0, food: 100, planks: 0, tools: 0 },

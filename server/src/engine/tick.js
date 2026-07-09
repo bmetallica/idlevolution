@@ -179,17 +179,17 @@ export function runTick(registry, state, game) {
     state.population = Math.min(housing, state.population + Math.max(0.01, state.population * g));
   }
 
-  // 4) Arbeiterzuweisungen an gesunkene Bevölkerung anpassen
-  const workforce = Math.floor(state.population);
-  let assigned = Object.values(state.buildings).reduce((s, b) => s + (b.workers ?? 0), 0);
-  if (assigned > workforce) {
-    for (const b of Object.values(state.buildings)) {
-      if (assigned <= workforce) break;
-      const take = Math.min(b.workers ?? 0, assigned - workforce);
-      b.workers -= take;
-      assigned -= take;
-    }
-  }
+  // 4) Arbeiterzuweisungen bei Bevölkerungsrückgang NICHT automatisch abbauen.
+  //    Früher wurden Arbeiter aus Gebäuden entfernt, sobald floor(Bevölkerung) <
+  //    zugewiesene Arbeiter fiel. Das koppelte die Produktion an die schrumpfende
+  //    Bevölkerung: erst fiel eine Kette (oft Nahrung) komplett aus, dann verstärkte
+  //    der Produktionsausfall den Mangel → irreversibler Kollaps bis 1, der sich
+  //    NICHT selbst bremste (Bedarf UND Produktion skalierten gemeinsam mit der
+  //    Bevölkerung → skaleninvariant). Die Zuweisungen bleiben jetzt erhalten;
+  //    dadurch ist die Produktion bei einem Rückgang stabil und die Bevölkerung
+  //    pendelt sich auf dem tragfähigen Niveau ein (Bedarf = Produktion) statt bis
+  //    auf 1 durchzulaufen. Zuweisungen begrenzt der Spieler beim Zuweisen selbst
+  //    (freie Arbeiter = Bevölkerung − zugewiesen), siehe /api/workers.
 
   // 5) Epochen-Aufstieg prüfen (advance-Bedingungen der AKTUELLEN Epoche)
   const epoch = currentEpoch(registry, state);
@@ -314,12 +314,14 @@ export function assignWorkers(registry, state, buildingId, delta) {
 
   const workforce = Math.floor(state.population);
   const assignedTotal = Object.values(state.buildings).reduce((s, x) => s + (x.workers ?? 0), 0);
-  const idle = workforce - assignedTotal;
+  // Nach einem Bevölkerungsrückgang kann zugewiesen > Bevölkerung sein (Zuweisungen
+  // bleiben erhalten) → freie Arbeiter nie negativ. Abziehen (delta<0) bleibt immer erlaubt.
+  const free = Math.max(0, workforce - assignedTotal);
   const maxForBuilding = (def.workers ?? 0) * b.count;
 
   const target = Math.max(0, Math.min(maxForBuilding, (b.workers ?? 0) + delta));
   const actualDelta = target - (b.workers ?? 0);
-  if (actualDelta > idle) throw new Error(`Nicht genug freie Arbeiter (frei: ${idle})`);
+  if (actualDelta > free) throw new Error(`Nicht genug freie Arbeiter (frei: ${free})`);
   b.workers = target;
   return { buildingId, workers: b.workers };
 }

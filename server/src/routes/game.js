@@ -114,7 +114,7 @@ export default async function gameRoutes(fastify) {
       })(),
       population: state.population,
       housing: totalHousing(registry, state, game),
-      workers: { total: workforce, assigned, idle: workforce - assigned },
+      workers: { total: workforce, assigned, idle: Math.max(0, workforce - assigned) },
       resources: [...registry.resources.values()].map((r) => ({
         id: r.id,
         amount: state.resources[r.id] ?? 0,
