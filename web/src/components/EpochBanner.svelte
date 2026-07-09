@@ -82,13 +82,17 @@
         <span class="text-stone-500">Bedarf:</span>
         {#each state.epoch.needs as n}
           <span
-            class="rounded-full px-2 py-0.5 border {n.ok
-              ? 'border-emerald-800 bg-emerald-950/40 text-emerald-300'
-              : 'border-red-800 bg-red-950/40 text-red-300'}"
-            title="Güterbedarf dieser Bevölkerungsstufe"
+            class="rounded-full px-2 py-0.5 border {!n.ok
+              ? 'border-red-800 bg-red-950/40 text-red-300'
+              : n.draining
+                ? 'border-amber-700 bg-amber-950/40 text-amber-300'
+                : 'border-emerald-800 bg-emerald-950/40 text-emerald-300'}"
+            title={n.draining && n.ok ? 'Vorrat schrumpft — Produktion deckt den Verbrauch nicht' : 'Güterbedarf dieser Bevölkerungsstufe'}
           >
-            {resourceIndex[n.id]?.icon || '📦'} {resourceIndex[n.id]?.name?.de || n.id}
-            <span class="font-mono">{n.have}/{n.need}</span> {n.ok ? '✓' : '⚠️'}
+            {resourceIndex[n.id]?.icon || '📦'} {n.name || resourceIndex[n.id]?.name?.de || n.id}
+            <span class="font-mono">{n.have}/{n.need}</span>
+            {#if n.rate != null}<span class="font-mono opacity-80">({n.rate > 0 ? '+' : ''}{n.rate}/t)</span>{/if}
+            {n.ok ? (n.draining ? '📉' : '✓') : '⚠️'}
           </span>
         {/each}
       </div>
@@ -104,6 +108,12 @@
             <br>→ Baue/verstärke Nahrungsgebäude (Sammlerhütte, Garten, Fischer) und weise ihnen Arbeiter zu.
           </div>
         {/if}
+        {#each (state.epoch.needs || []).filter((n) => !n.ok || n.draining) as n}
+          <div class="mt-1 text-red-300/90">
+            {resourceIndex[n.id]?.icon || '📦'} {n.name || n.id}: <span class="font-mono">{n.have}</span> vorhanden, Verbrauch <span class="font-mono">{n.need}</span>/Tick, Netto <span class="font-mono">{n.rate > 0 ? '+' : ''}{n.rate}</span>/Tick{#if n.ok && n.draining} — <b>Vorrat läuft leer</b>{/if}.
+            <br>→ Baue/verstärke die Produktionskette für {n.name || n.id} und weise Arbeiter zu.
+          </div>
+        {/each}
       </div>
     {/if}
   {/if}

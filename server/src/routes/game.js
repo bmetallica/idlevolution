@@ -50,9 +50,37 @@ export default async function gameRoutes(fastify) {
     for (const r of registry.resources.values()) if (r.category === 'food') { foodAvail += state.resources[r.id] || 0; foodRate += rates[r.id] || 0; }
     const sat = state.satisfaction ?? 1;
     const housingCap = totalHousing(registry, state, game);
+
+    // Stufen-Bedürfnisse (epoch.needs) inkl. Netto-Rate — deckt auf, wenn ein
+    // gefordertes Gut schneller verbraucht als produziert wird (drainender Vorrat).
+    const needsDetail = epoch?.needs
+      ? Object.entries(epoch.needs).map(([rid, perPop]) => {
+          const need = state.population * perPop;
+          const have = state.resources[rid] ?? 0;
+          const rate = rates[rid] ?? 0; // Netto pro Tick NACH Bedarf (computeNetRates zieht Bedarf ab)
+          return {
+            id: rid,
+            name: registry.resources.get(rid)?.name?.de || rid,
+            perPop,
+            need: Math.round(need * 100) / 100,
+            have: Math.round(have * 10) / 10,
+            rate: Math.round(rate * 1000) / 1000,
+            ok: have + 1e-6 >= need,
+            draining: rate < -1e-6, // Vorrat schrumpft trotz evtl. aktuellem Puffer
+          };
+        })
+      : [];
+    const missingNeeds = needsDetail.filter((n) => !n.ok);
+    const drainingNeeds = needsDetail.filter((n) => n.ok && n.draining);
+
     let popTrend = 'stable', popReason = null;
     if (foodAvail + 1e-6 < foodNeed) { popTrend = 'shrinking'; popReason = 'Nahrungsmangel — es wird zu wenig Nahrung produziert'; }
-    else if (sat < 0.4) { popTrend = 'shrinking'; popReason = 'Unzufriedenheit — der Bevölkerung fehlen benötigte Güter'; }
+    else if (sat < 0.4) {
+      popTrend = 'shrinking';
+      const names = missingNeeds.map((n) => n.name).join(', ') || 'benötigte Güter';
+      popReason = `Unzufriedenheit — es fehlt: ${names} (Stufen-Bedarf der Bevölkerung nicht gedeckt)`;
+    }
+    else if (drainingNeeds.length) { popReason = `Warnung — Vorrat schrumpft: ${drainingNeeds.map((n) => n.name).join(', ')} (bald Unzufriedenheit)`; if (state.population + 1e-6 < housingCap) popTrend = 'growing'; }
     else if (state.population + 1e-6 < housingCap) { popTrend = 'growing'; popReason = null; }
 
     return {
@@ -65,19 +93,7 @@ export default async function gameRoutes(fastify) {
         tier: epoch.tier?.name || null,
         next: nextEpoch ? { id: nextEpoch.id, name: nextEpoch.name } : null,
         progress: describeConditions(epoch.advance, registry, state),
-        needs: epoch.needs
-          ? Object.entries(epoch.needs).map(([rid, perPop]) => {
-              const need = state.population * perPop;
-              const have = state.resources[rid] ?? 0;
-              return {
-                id: rid,
-                perPop,
-                need: Math.round(need * 100) / 100,
-                have: Math.round(have * 10) / 10,
-                ok: have + 1e-6 >= need,
-              };
-            })
-          : [],
+        needs: needsDetail,
       },
       satisfaction: state.satisfaction ?? 1,
       popTrend,

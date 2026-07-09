@@ -185,6 +185,49 @@ function reachabilityIssues(registry) {
   return issues;
 }
 
+/**
+ * Entfernt aus dem Pack gezielt die Items, die einen NEUEN Soft-Lock einführen
+ * würden — Gebäude, deren Input kein Produzent (weder Registry noch Pack) deckt,
+ * sowie Epochen-Bedürfnisse ohne Produzent. Fixpunkt-Iteration, weil das Streichen
+ * eines Gebäudes den einzigen Produzenten eines anderen Inputs entfernen kann.
+ * Rückgabe: Liste der gestrichenen Items (für die Lauf-Historie), damit statt einer
+ * Total-Ablehnung ein Teil-Import ('partial') möglich ist.
+ */
+export function pruneUnreachable(pack, registry) {
+  const dropped = [];
+  const produced = (rid, packBuildings) => {
+    for (const b of registry.buildings.values()) if ((b.production?.outputs || {})[rid] > 0) return true;
+    for (const b of packBuildings) if ((b.production?.outputs || {})[rid] > 0) return true;
+    return false;
+  };
+  if (Array.isArray(pack.buildings)) {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const keep = [];
+      for (const b of pack.buildings) {
+        const missing = Object.keys(b.production?.inputs || {}).filter((rid) => !produced(rid, pack.buildings));
+        if (missing.length) {
+          dropped.push({ type: 'reachability', reason: `Gebäude '${b.id}' entfernt: Input '${missing.join("', '")}' hat keinen Produzenten` });
+          changed = true; // erneut prüfen — evtl. verliert ein anderes Gebäude nun seinen Produzenten
+        } else keep.push(b);
+      }
+      pack.buildings = keep;
+    }
+    if (!pack.buildings.length) delete pack.buildings;
+  }
+  // Epochen-Bedürfnisse ohne Produzent: nur das einzelne Bedürfnis streichen, Epoche bleibt
+  for (const e of pack.epochs || []) {
+    for (const rid of Object.keys(e.needs || {})) {
+      if (!produced(rid, pack.buildings || [])) {
+        delete e.needs[rid];
+        dropped.push({ type: 'reachability', reason: `Bedürfnis '${rid}' aus Epoche '${e.id}' entfernt: kein Produzent` });
+      }
+    }
+  }
+  return dropped;
+}
+
 /** Prüft, ob das Pack NEUE Soft-Locks einführt (vorbestehende zählen nicht). */
 function softLockCheck(pack, ctx) {
   const before = reachabilityIssues(ctx.registryHolder.registry);
@@ -270,19 +313,22 @@ export async function importPack(rawPack, run, ctx) {
   if (!refs.ok) return reject(refs.errors.map((e) => ({ type: 'reference', reason: e })));
 
   const { pack: balanced, rejected, notes } = balancePack(pack, registry, ctx.balance);
+  // Unerreichbare Items gezielt streichen (statt ganzes Pack ablehnen) → Teil-Import
+  const pruned = pruneUnreachable(balanced, registry);
+  const allRejected = [...rejected, ...pruned];
   const itemCount =
     (balanced.resources?.length ?? 0) +
     (balanced.buildings?.length ?? 0) +
     (balanced.epochs?.length ?? 0) +
     (balanced.events?.length ?? 0) +
     Object.keys(balanced.epochAdvance || {}).length;
-  if (itemCount === 0) return reject([...rejected, { type: 'balance', reason: 'kein Item hat das Balancing überstanden' }]);
+  if (itemCount === 0) return reject([...allRejected, { type: 'balance', reason: 'kein Item hat das Balancing/die Erreichbarkeit überstanden' }]);
 
   const soft = softLockCheck(balanced, ctx);
-  if (!soft.ok) return reject([...rejected, ...soft.errors.map((e) => ({ type: 'reachability', reason: e }))]);
+  if (!soft.ok) return reject([...allRejected, ...soft.errors.map((e) => ({ type: 'reachability', reason: e }))]);
 
   const sandbox = sandboxCheck(balanced, ctx);
-  if (!sandbox.ok) return reject([...rejected, ...sandbox.errors.map((e) => ({ type: 'sandbox', reason: e }))]);
+  if (!sandbox.ok) return reject([...allRejected, ...sandbox.errors.map((e) => ({ type: 'sandbox', reason: e }))]);
 
   // Persistieren + Hot-Reload
   const day = new Date().toISOString().slice(0, 10);
@@ -300,17 +346,17 @@ export async function importPack(rawPack, run, ctx) {
     epochAdvance: Object.keys(balanced.epochAdvance || {}),
     notes,
   };
-  const status = rejected.length > 0 ? 'partial' : 'accepted';
-  await recordRun(ctx.pool, { status, run, accepted, rejected });
+  const status = allRejected.length > 0 ? 'partial' : 'accepted';
+  await recordRun(ctx.pool, { status, run, accepted, rejected: allRejected });
   try {
     await ctx.pool.query(
       'INSERT INTO content_packs (id, source, status, file_path, payload) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (id) DO NOTHING',
       [balanced.pack.id, balanced.pack.source, 'active', file, JSON.stringify(balanced)]
     );
-    await logEvent(ctx.pool, 'ai_import', { packId: balanced.pack.id, accepted, rejected });
+    await logEvent(ctx.pool, 'ai_import', { packId: balanced.pack.id, accepted, rejected: allRejected });
   } catch {
     // Audit-Fehler blockieren den Import nicht
   }
 
-  return { status, packId: balanced.pack.id, file, accepted, rejected, notes, chronicle: balanced.chronicle || null };
+  return { status, packId: balanced.pack.id, file, accepted, rejected: allRejected, notes, chronicle: balanced.chronicle || null };
 }

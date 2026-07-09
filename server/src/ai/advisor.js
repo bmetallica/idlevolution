@@ -15,6 +15,23 @@ function snapshot(ctx) {
   let foodAvail = 0, foodRate = 0;
   for (const r of registry.resources.values()) if (r.category === 'food') { foodAvail += state.resources[r.id] || 0; foodRate += rates[r.id] || 0; }
 
+  // Stufen-Bedürfnisse mit Deckungsstatus + Netto-Rate (deckt drainende Vorräte auf)
+  const stufenbeduerfnisse = epoch?.needs
+    ? Object.entries(epoch.needs).map(([rid, perPop]) => {
+        const need = state.population * perPop;
+        const have = state.resources[rid] || 0;
+        const rate = rates[rid] || 0;
+        return {
+          gut: registry.resources.get(rid)?.name?.de || rid,
+          vorhanden: Math.round(have * 10) / 10,
+          bedarfProTick: Math.round(need * 100) / 100,
+          nettoRateProTick: Math.round(rate * 1000) / 1000,
+          gedeckt: have + 1e-6 >= need,
+          vorratSchrumpft: rate < -1e-6,
+        };
+      })
+    : [];
+
   const buildings = Object.entries(state.buildings)
     .filter(([, b]) => b.count > 0)
     .map(([id, b]) => {
@@ -41,7 +58,7 @@ function snapshot(ctx) {
     nahrung: { vorhanden: Math.round(foodAvail * 10) / 10, bedarfProTick: Math.round(foodNeed * 100) / 100, produktionProTick: Math.round(foodRate * 1000) / 1000, ausreichend: foodAvail + 1e-6 >= foodNeed },
     epoche: epoch?.name?.de,
     bevoelkerungsstufe: epoch?.tier?.name?.de,
-    stufenbeduerfnisse: epoch?.needs || null,
+    stufenbeduerfnisse,
     freieArbeiter: Math.floor(state.population) - buildings.reduce((s, b) => s + (Number(b.arbeiter.split('/')[0]) || 0), 0),
     gebaeude: buildings,
     ressourcen: resources,
@@ -51,9 +68,10 @@ function snapshot(ctx) {
 const SYSTEM = `Du bist ein hilfreicher Berater in einem grafischen Aufbau-Idle-Spiel (Stil Anno).
 Beantworte die Frage des Spielers KURZ (höchstens 4 Sätze), konkret und auf Deutsch — ausschließlich anhand der bereitgestellten Spieldaten, ohne Erfindungen.
 Wichtige Regeln der Simulation:
-- Bevölkerung schrumpft bei Nahrungsmangel (nahrung.ausreichend=false bzw. produktionProTick ≤ bedarfProTick) ODER bei Unzufriedenheit (zufriedenheit < 40%, weil Stufenbedürfnisse fehlen).
+- Bevölkerung schrumpft bei Nahrungsmangel (nahrung.ausreichend=false) ODER bei Unzufriedenheit (zufriedenheit < 40 %).
+- Unzufriedenheit entsteht, wenn ein Stufenbedürfnis (stufenbeduerfnisse[]) nicht gedeckt ist (gedeckt=false). WICHTIG: Auch ein volles Lager schützt nicht dauerhaft — bei nettoRateProTick < 0 (vorratSchrumpft=true) läuft der Vorrat leer und die Bevölkerung schrumpft trotz aktueller Menge. Prüfe daher zuerst diese Liste, wenn Bevölkerung sinkt aber Nahrung reicht.
 - Bevölkerung wächst nur bei Nahrungs-Überschuss und freiem Wohnraum.
-- Produktionsgebäude brauchen zugewiesene Arbeiter (arbeiter "zugewiesen/maximal"); ohne Arbeiter keine Produktion.
+- Produktionsgebäude brauchen zugewiesene Arbeiter (arbeiter "zugewiesen/maximal"); ohne Arbeiter keine Produktion. Zu wenig Produktion eines Stufen-Guts → nettoRateProTick negativ → Vorrat drainert.
 Nenne die konkrete Ursache und einen umsetzbaren Rat (welches Gebäude bauen / wo Arbeiter zuweisen).`;
 
 /** Beantwortet eine Spielerfrage anhand des Spielstands. */

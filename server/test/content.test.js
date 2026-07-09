@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { loadRegistry } from '../src/content/loader.js';
 import { validatePack, validateStructure } from '../src/content/validator.js';
 import { balancePack } from '../src/content/balancer.js';
+import { pruneUnreachable } from '../src/ai/importer.js';
 import { readFile } from 'node:fs/promises';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
@@ -30,6 +31,38 @@ test('Base-Content-Pack lädt vollständig', async () => {
     assert.ok(registry.resources.has(id), `Basis-Ressource '${id}' fehlt`);
   }
   assert.ok(registry.buildings.get('lumberjack').production.outputs.wood > 0);
+});
+
+test('pruneUnreachable: Gebäude mit Input ohne Produzent wird gestrichen, Rest bleibt', () => {
+  // Registry: nur ein Holzfäller, der wood produziert
+  const registry = { buildings: new Map([['lumberjack', { id: 'lumberjack', production: { outputs: { wood: 1 }, inputs: {} } }]]) };
+  const pack = {
+    buildings: [
+      { id: 'sawmill', production: { inputs: { wood: 1 }, outputs: { planks: 1 } } }, // wood existiert → bleibt
+      { id: 'joinery', production: { inputs: { planks: 1 }, outputs: { furniture: 1 } } }, // planks vom sawmill → bleibt
+      { id: 'weaving_mill', production: { inputs: { wool: 1 }, outputs: { cloth: 1 } } }, // wool: kein Produzent → raus
+    ],
+    epochs: [{ id: 'age_x', needs: { furniture: 0.01, cloth: 0.01 } }], // furniture produzierbar → bleibt, cloth → raus (weaving_mill fällt)
+  };
+  const dropped = pruneUnreachable(pack, registry);
+  const ids = pack.buildings.map((b) => b.id);
+  assert.deepEqual(ids, ['sawmill', 'joinery']);
+  assert.ok(dropped.some((d) => /weaving_mill/.test(d.reason)));
+  assert.deepEqual(Object.keys(pack.epochs[0].needs), ['furniture']);
+  assert.ok(dropped.some((d) => /cloth/.test(d.reason)));
+});
+
+test('pruneUnreachable: kaskadiert (fällt der einzige Produzent, fällt auch der Verbraucher)', () => {
+  const registry = { buildings: new Map() };
+  const pack = {
+    buildings: [
+      { id: 'weaver', production: { inputs: { wool: 1 }, outputs: { cloth: 1 } } }, // wool fehlt → raus
+      { id: 'tailor', production: { inputs: { cloth: 1 }, outputs: { coat: 1 } } }, // cloth nur von weaver → nach dessen Wegfall auch raus
+    ],
+  };
+  const dropped = pruneUnreachable(pack, registry);
+  assert.equal(pack.buildings, undefined); // alle gestrichen
+  assert.equal(dropped.length, 2);
 });
 
 test('Validator: strukturell kaputtes Pack wird abgelehnt', () => {
