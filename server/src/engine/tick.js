@@ -97,10 +97,13 @@ export function applyNeeds(registry, state, epoch, target, apply) {
   for (const rid of ids) {
     const need = state.population * (needs[rid] ?? 0);
     if (need <= 0) { sat += 1; continue; }
-    const avail = Math.max(0, state.resources[rid] ?? 0);
+    // Im Raten-Modus (apply=false) die bereits in target verbuchte Produktion dieses
+    // Ticks einrechnen — im echten Tick wird der Bedarf NACH der Produktion verbraucht.
+    // Sonst erscheint die Rate fälschlich positiv, obwohl der Bestand bei 0 bleibt.
+    const avail = Math.max(0, (state.resources[rid] ?? 0) + (apply ? 0 : (target?.[rid] ?? 0)));
     const take = Math.min(avail, need);
     sat += take / need;
-    if (apply) state.resources[rid] = avail - take;
+    if (apply) state.resources[rid] = Math.max(0, state.resources[rid] ?? 0) - take;
     else if (target) target[rid] = (target[rid] ?? 0) - take;
   }
   return sat / ids.length;
@@ -119,7 +122,9 @@ function distributeFoodConsumption(registry, state, need, target, dryRun = false
   let totalAvail = 0;
   for (const res of registry.resources.values()) {
     if (res.category !== 'food') continue;
-    const avail = Math.max(0, state.resources[res.id] ?? 0);
+    // Raten-Modus: Produktion dieses Ticks (bereits in target) mitzählen — sonst
+    // wird die Nahrungsrate bei leerem Vorrat trotz laufender Produktion verzerrt.
+    const avail = Math.max(0, (state.resources[res.id] ?? 0) + (dryRun ? (target?.[res.id] ?? 0) : 0));
     if (avail <= 0) continue;
     foods.push([res.id, avail]);
     totalAvail += avail;
