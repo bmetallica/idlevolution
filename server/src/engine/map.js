@@ -208,7 +208,9 @@ export function canPlace(map, state, registry, def, x, y, rot = 0) {
     for (let dx = 0; dx < w; dx++) {
       if (!inBounds(map, x + dx, y + dy)) return { ok: false, reason: 'außerhalb der Karte' };
       const t = effectiveTerrain(map, state, x + dx, y + dy);
-      if (!allowed.includes(t)) return { ok: false, reason: `Terrain '${t}' nicht bebaubar (braucht: ${allowed.join('/')})` };
+      // Wald/Fels darf von normalen Gebäuden (die Gras/Sand nutzen) gerodet werden
+      const clearable = (t === 'forest' || t === 'rock') && (allowed.includes('grass') || allowed.includes('sand'));
+      if (!allowed.includes(t) && !clearable) return { ok: false, reason: `Terrain '${t}' nicht bebaubar (braucht: ${allowed.join('/')})` };
     }
   }
 
@@ -234,8 +236,8 @@ export function canPlace(map, state, registry, def, x, y, rot = 0) {
 }
 
 // ── Straßen (Infrastruktur) ─────────────────────────────────────────────────
-// Straßen auf Wasser werden als Brücken gerendert.
-const ROAD_TERRAIN = ['grass', 'sand', 'water'];
+// Straßen dürfen auf Wasser (=Brücke) sowie auf Wald/Fels (rodet sie) gebaut werden.
+const ROAD_TERRAIN = ['grass', 'sand', 'water', 'forest', 'rock'];
 
 /** Setzt/entfernt eine Straße auf (x,y). state.roads ist ein Set aus "x,y". */
 export function setRoad(map, state, registry, x, y, on) {
@@ -247,7 +249,8 @@ export function setRoad(map, state, registry, x, y, on) {
   if (!ROAD_TERRAIN.includes(t)) throw new Error(`Straße nur auf ${ROAD_TERRAIN.join('/')} (hier: ${t})`);
   if (occupiedTiles(state, registry).has(key)) throw new Error('Feld ist bebaut');
   state.roads.add(key);
-  if (state.placed && state.placed[key]) delete state.placed[key]; // Straße räumt Deko
+  if (state.placed && state.placed[key]) delete state.placed[key]; // Straße räumt platzierte Deko
+  if (t === 'forest' || t === 'rock') { state.cleared ??= new Set(); state.cleared.add(key); } // rodet Wald/Fels
   return { x, y, on: true };
 }
 

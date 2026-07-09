@@ -28,7 +28,9 @@ export function canPlaceClient(map, instances, defIndex, def, x, y, rot = 0) {
     for (let dx = 0; dx < w; dx++) {
       const t = terrainAt(map, x + dx, y + dy);
       if (t === null) return { ok: false, reason: 'außerhalb der Karte' };
-      if (!allowed.includes(t)) return { ok: false, reason: `braucht ${allowed.join('/')}` };
+      // Wald/Fels darf von Gras/Sand-Gebäuden gerodet werden
+      const clearable = (t === 'forest' || t === 'rock') && (allowed.includes('grass') || allowed.includes('sand'));
+      if (!allowed.includes(t) && !clearable) return { ok: false, reason: `braucht ${allowed.join('/')}` };
     }
   }
   const occ = occupiedTiles(instances, defIndex);

@@ -217,7 +217,9 @@ test('Straßen: setRoad respektiert Terrain und Belegung', () => {
   });
   setRoad(MAP, state, registry, 3, 2, true); // Gras → ok
   assert.ok(state.roads.has('3,2'));
-  assert.throws(() => setRoad(MAP, state, registry, 1, 1, true), /Straße nur/); // Wald → ungültig
+  setRoad(MAP, state, registry, 1, 1, true); // Wald → Straße baubar, rodet den Wald
+  assert.ok(state.roads.has('1,1'));
+  assert.ok(state.cleared.has('1,1'));
   setRoad(MAP, state, registry, 0, 5, true); // Wasser → Brücke ok
   assert.ok(state.roads.has('0,5'));
   assert.throws(() => setRoad(MAP, state, registry, 2, 2, true), /bebaut/); // belegt

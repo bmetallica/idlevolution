@@ -70,7 +70,12 @@
     for (let vy = 0; vy < N; vy++) {
       for (let vx = 0; vx < N; vx++) {
         const [gx, gy] = rotInv(vx, vy);
-        const t = map.legend[map.tiles[gy * map.width + gx]];
+        const key = `${gx},${gy}`;
+        let t = map.legend[map.tiles[gy * map.width + gx]];
+        if ((t === 'forest' || t === 'rock') && clearedSet.has(key)) t = 'grass'; // gerodet = flaches Gras
+        const p = placed[key];
+        if (p === 'tree') t = 'forest'; // platzierte Deko hebt den Untergrund an
+        else if (p === 'rock') t = 'rock';
         const col = TERRAIN_COLORS[t] || TERRAIN_COLORS.grass;
         drawTile(g, vx, vy, t, col, off, isWaterV);
       }
@@ -93,8 +98,8 @@
         const t = map.legend[map.tiles[gy * map.width + gx]];
         const p = placed[key];
         let type = null, hgt = 0;
-        if (p === 'tree') type = 'tree';
-        else if (p === 'rock') type = 'rock';
+        if (p === 'tree') { type = 'tree'; hgt = TERRAIN_COLORS.forest.h; } // auf angehobenem Untergrund
+        else if (p === 'rock') { type = 'rock'; hgt = TERRAIN_COLORS.rock.h; }
         else if (t === 'forest' && !clearedSet.has(key)) { type = 'tree'; hgt = TERRAIN_COLORS.forest.h; }
         else if (t === 'rock' && !clearedSet.has(key) && tileRand(gx, gy, 4) > 0.35) { type = 'rock'; hgt = TERRAIN_COLORS.rock.h; }
         if (!type) continue;
@@ -599,8 +604,8 @@
     if (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height) return false;
     if (erasing) return roadSet.has(`${gx},${gy}`);
     const t = map.legend[map.tiles[gy * map.width + gx]];
-    // Gras/Sand = Straße, Wasser = Brücke
-    return (t === 'grass' || t === 'sand' || t === 'water') && !instanceAt(gx, gy) && !roadSet.has(`${gx},${gy}`);
+    // Alle Terrains bebaubar: Wasser=Brücke, Wald/Fels werden gerodet
+    return !!t && !instanceAt(gx, gy) && !roadSet.has(`${gx},${gy}`);
   }
   // Beim Ziehen eine GERADE Linie vom Start zum aktuellen Feld aufbauen
   function roadLineTo(e) {
@@ -730,7 +735,7 @@
 
   // Terrain nur backen, wenn eine WIRKLICH neue Karte eintrifft (nicht pro Frame)
   $: if (map && ctx) {
-    const sig = `${map.width}x${map.height}:${map.version ?? map.seed ?? map.tiles?.length}:${viewRot}`;
+    const sig = `${map.width}x${map.height}:${map.version ?? map.seed ?? map.tiles?.length}:${viewRot}:${cleared.length}:${JSON.stringify(placed)}`;
     if (sig !== _terrainSig) { _terrainSig = sig; buildTerrain(); bakeMini(); _roadsSig = null; _decoSig = null; }
   }
   // Deko neu backen, wenn sich placed/cleared oder die Karte ändern
