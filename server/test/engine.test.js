@@ -7,7 +7,7 @@ import { loadRegistry } from '../src/content/loader.js';
 import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity, computeNetRates, computeResourceFlows } from '../src/engine/tick.js';
 import { evaluateConditions } from '../src/engine/rules.js';
 import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '../src/engine/map.js';
-import { generateWorld, islandAt, islandById } from '../src/engine/world.js';
+import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyState } from '../src/engine/world.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const silent = { warn() {}, info() {} };
@@ -136,6 +136,47 @@ test('Welt: N Inseln, durch Ozean getrennt, Territorium korrekt', () => {
 
   assert.equal(islandById(world, 3)?.id, 3);
   assert.equal(islandAt(world, 0, 0), null); // Ozean-Rand
+});
+
+test('Migration: Alt-Insel wird als Insel 0 eingebettet, Terrain+Gebäude erhalten', () => {
+  // Alt-Zustand auf kleiner 24x24-Insel
+  const legacyMap = generateMap(123, 24, 24);
+  const cx = 12, cy = 12; // Mitte (freigeräumtes Gras)
+  const legacy = {
+    tick: 100, epochId: 'bronze_age', population: 42, satisfaction: 1,
+    resources: { wood: 50 }, buildings: { hut: { count: 1, workers: 0 } },
+    instances: [{ id: 1, buildingId: 'hut', x: cx, y: cy, rot: 0, doneAtTick: 0, counted: true }],
+    roads: new Set([`${cx + 1},${cy}`]),
+    placed: { [`${cx},${cy + 1}`]: 'tree' },
+    cleared: new Set(),
+    nextInstanceId: 2, mapVersion: 0,
+    map: legacyMap,
+  };
+
+  const world = buildWorldFromLegacy(legacyMap, { islandCount: 3, islandSize: 32, gap: 12 });
+  const isl0 = world.islands[0];
+  // Insel 0 hat exakt die Alt-Größe und -Terrain
+  assert.equal(isl0.w, 24); assert.equal(isl0.h, 24);
+  const worldTile = (x, y) => world.tiles[y * world.width + x];
+  for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) {
+    assert.equal(worldTile(isl0.x + x, isl0.y + y), legacyMap.tiles[y * 24 + x]);
+  }
+
+  const emb = embedLegacyState(legacy, world);
+  // Fortschrittsdaten erhalten
+  assert.equal(emb.population, 42);
+  assert.equal(emb.tick, 100);
+  assert.equal(emb.resources.wood, 50);
+  assert.equal(emb.islandId, 0);
+  assert.deepEqual(emb.region, { x: isl0.x, y: isl0.y, w: 24, h: 24 });
+  // Gebäude um den Insel-Offset verschoben, auf gleichem Terrain wie zuvor
+  const inst = emb.instances[0];
+  assert.equal(inst.x, cx + isl0.x);
+  assert.equal(inst.y, cy + isl0.y);
+  assert.equal(worldTile(inst.x, inst.y), legacyMap.tiles[cy * 24 + cx]); // selbes Terrain
+  // Straße & Deko mitverschoben
+  assert.ok(emb.roads.has(`${cx + 1 + isl0.x},${cy + isl0.y}`));
+  assert.equal(emb.placed[`${cx + isl0.x},${cy + 1 + isl0.y}`], 'tree');
 });
 
 test('Territorium: Bauen nur in der eigenen Insel-Region', () => {
