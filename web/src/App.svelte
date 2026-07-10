@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco } from './lib/api.js';
+  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi } from './lib/api.js';
   import { buildChainIndex, computeShortages } from './lib/chains.js';
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
@@ -20,6 +20,29 @@
   let selection = null; // ausgewähltes Feld/Gebäude
   let showChronicle = false;
   let showAssist = false;
+  let showPlayers = false;
+  let players = null; // { islands, players, freeSlots, maxAi }
+  let aiBusy = false;
+
+  async function loadPlayers() {
+    try { players = await fetchPlayers(); } catch {}
+  }
+  async function addAi() {
+    if (aiBusy) return; aiBusy = true;
+    try { const r = await enableAi(); showFlash(`KI-Spieler „${r.player.name}" auf Insel ${r.player.islandId} zugeschaltet`); await loadPlayers(); mapComp?.focusIsland?.(r.player.islandId); }
+    catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  async function removeAi(id) {
+    aiBusy = true;
+    try { await disableAi(id); await loadPlayers(); } catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  // Alle Instanzen (Mensch detailliert aus state + KI-Inseln aus /api/players) für die Weltansicht
+  $: allInstances = [
+    ...((state?.instances) || []),
+    ...(((players?.players) || []).filter((p) => p.id !== 0).flatMap((p) => p.instances || [])),
+  ];
   let roadMode = false; // Straßen-Malmodus
   let decoType = null; // 'tree' | 'rock' im Deko-Malmodus
   let mapComp;
@@ -130,12 +153,15 @@
     loadContent();
     loadMap();
     pollState();
+    loadPlayers();
     const s = setInterval(pollState, 2000);
     const c = setInterval(loadContent, 60000);
+    const pl = setInterval(loadPlayers, 3000);
     window.addEventListener('keydown', onKey);
     return () => {
       clearInterval(s);
       clearInterval(c);
+      clearInterval(pl);
       window.removeEventListener('keydown', onKey);
     };
   });
@@ -159,7 +185,7 @@
     <IsoMap
       bind:this={mapComp}
       {map}
-      instances={state.instances}
+      instances={allInstances}
       {defIndex}
       {epochIndex}
       {buildDef}
@@ -217,6 +243,13 @@
         title="Felsen setzen (Fels-Nachbarschaft) — ziehen setzt, Rechtsklick entfernt"
       >
         🪨
+      </button>
+      <button
+        class="border rounded px-3 py-1.5 text-sm {showPlayers ? 'bg-sky-800 border-sky-500 text-sky-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
+        on:click={() => (showPlayers = !showPlayers)}
+        title="Nachbarn — KI-Spieler zuschalten/ansehen"
+      >
+        🌍
       </button>
       <button
         class="border rounded px-3 py-1.5 text-sm {showAssist ? 'bg-indigo-800 border-indigo-500 text-indigo-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
@@ -292,6 +325,42 @@
             pollState();
           }}
         />
+      </div>
+    {/if}
+
+    <!-- Nachbarn / KI-Spieler-Panel -->
+    {#if showPlayers}
+      <div class="absolute top-28 right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-sky-800 bg-stone-900/95 backdrop-blur shadow-xl p-3">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-sm font-semibold text-sky-200">🌍 Nachbarn</span>
+          <button class="ml-auto text-stone-500 hover:text-stone-200" on:click={() => (showPlayers = false)}>✕</button>
+        </div>
+        {#if players}
+          <div class="space-y-1.5">
+            {#each players.players as p}
+              <div class="flex items-center gap-2 rounded border border-stone-700 bg-stone-800/60 px-2 py-1.5 text-sm">
+                <span>{p.kind === 'human' ? '🧑' : '🤖'}</span>
+                <button class="text-left flex-1 min-w-0" title="Zur Insel springen" on:click={() => mapComp?.focusIsland?.(p.islandId)}>
+                  <div class="text-stone-200 truncate">{p.name}{p.kind === 'human' ? ' (du)' : ''}</div>
+                  <div class="text-[11px] text-stone-500">Insel {p.islandId} · 👥 {p.population} · {p.epoch || '—'} · 🏠 {p.buildings}</div>
+                </button>
+                {#if p.kind === 'ai'}
+                  <button class="text-xs text-stone-500 hover:text-red-300" title="KI abschalten" on:click={() => removeAi(p.id)} disabled={aiBusy}>⏻</button>
+                {/if}
+              </div>
+            {/each}
+          </div>
+          {#if (players.players.filter((p) => p.kind === 'ai').length) < (players.maxAi ?? 4)}
+            <button class="mt-2.5 w-full rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-50 px-3 py-1.5 text-sm text-white" on:click={addAi} disabled={aiBusy || !(players.freeSlots || []).length}>
+              ➕ KI-Spieler zuschalten
+            </button>
+          {:else}
+            <p class="mt-2 text-[11px] text-stone-500">Maximal {players.maxAi} KI-Spieler.</p>
+          {/if}
+          <p class="mt-2 text-[11px] text-stone-500">KI-Inseln entwickeln sich in Echtzeit mit. Klick auf einen Namen springt hin.</p>
+        {:else}
+          <p class="text-xs text-stone-500">Lade…</p>
+        {/if}
       </div>
     {/if}
 

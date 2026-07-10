@@ -9,6 +9,7 @@ import { evaluateConditions } from '../src/engine/rules.js';
 import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '../src/engine/map.js';
 import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyState } from '../src/engine/world.js';
 import { newPlayerOnIsland, bootWorld } from '../src/engine/players.js';
+import { runExecutor } from '../src/ai/executor.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const silent = { warn() {}, info() {} };
@@ -214,6 +215,19 @@ test('bootWorld: frische Welt + Spieler 0 (Mock-Pool, keine Legacy)', async () =
   assert.equal(h.map.width, world.width); // geteilte Karte referenziert
   assert.ok(calls.some((c) => /INSERT INTO world/.test(c)), 'Welt wurde gespeichert');
   assert.ok(calls.some((c) => /INSERT INTO players/.test(c)), 'Spieler wurde gespeichert');
+});
+
+test('Executor: KI-Insel baut selbstständig und bleibt auf ihrer Insel', () => {
+  const world = { ...generateWorld(11, { islandCount: 4, islandSize: 44, gap: 16 }), version: 1 };
+  const ai = newPlayerOnIsland(game, registry, world, 1, { id: 1, kind: 'ai', name: 'KI' });
+  const before = ai.instances.length;
+  for (let t = 0; t < 500; t++) { runExecutor(registry, ai, game); runTick(registry, ai, game); }
+  assert.ok(ai.instances.length > before, `KI baute nichts (${before} → ${ai.instances.length})`);
+  assert.ok(ai.population >= 1, `Bevölkerung kollabiert (${ai.population})`);
+  for (const i of ai.instances) assert.equal(islandAt(world, i.x, i.y), 1, `Gebäude außerhalb Insel 1 @(${i.x},${i.y})`);
+  // Der Executor sollte auch Arbeiter zugewiesen haben
+  const assigned = Object.values(ai.buildings).reduce((s, b) => s + (b.workers || 0), 0);
+  assert.ok(assigned > 0, 'keine Arbeiter zugewiesen');
 });
 
 test('Territorium: Bauen nur in der eigenen Insel-Region', () => {

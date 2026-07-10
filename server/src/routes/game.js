@@ -12,7 +12,7 @@ import {
 import { describeConditions } from '../engine/rules.js';
 import { epochsInOrder } from '../content/loader.js';
 import { logEvent } from '../engine/state.js';
-import { savePlayer } from '../engine/players.js';
+import { savePlayer, newPlayerOnIsland } from '../engine/players.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
 import { askAdvisor } from '../ai/advisor.js';
@@ -225,6 +225,53 @@ export default async function gameRoutes(fastify) {
       reply.code(400);
       return { ok: false, error: err.message };
     }
+  });
+
+  // ── Spieler/KI-Verwaltung (Mehr-Insel-Welt) ──
+  const AI_NAMES = ['Nordmark', 'Sturmfels', 'Goldbucht', 'Wyrmspitze', 'Silbertal', 'Eisenhort'];
+
+  // Liste aller Spieler + Inseln + Render-Instanzen aller Inseln (für die Weltansicht)
+  fastify.get('/api/players', async () => {
+    const { registry } = ctx.registryHolder;
+    return {
+      islands: ctx.world?.islands || [],
+      maxAi: 4,
+      freeSlots: (ctx.world?.islands || []).filter((isl) => !ctx.players.some((p) => p.islandId === isl.id && p.active !== false)).map((isl) => isl.id),
+      players: ctx.players.map((p) => ({
+        id: p.id, kind: p.kind, name: p.name, islandId: p.islandId, active: p.active !== false,
+        population: Math.round(p.population), epoch: currentEpoch(registry, p)?.name?.de || null,
+        buildings: (p.instances || []).filter((i) => i.counted).length,
+        instances: (p.instances || []).map((i) => ({ id: i.id, buildingId: i.buildingId, x: i.x, y: i.y, rot: i.rot ?? 0, done: !!i.counted, owner: p.id })),
+      })),
+    };
+  });
+
+  // KI-Spieler auf einer freien Insel zuschalten (max. 4)
+  fastify.post('/api/players/enable', async (req, reply) => {
+    const { registry } = ctx.registryHolder;
+    if (ctx.players.filter((p) => p.kind === 'ai' && p.active !== false).length >= 4) { reply.code(400); return { ok: false, error: 'Maximal 4 KI-Spieler' }; }
+    const free = (ctx.world?.islands || []).find((isl) => !ctx.players.some((p) => p.islandId === isl.id && p.active !== false));
+    if (!free) { reply.code(400); return { ok: false, error: 'Keine freie Insel verfügbar' }; }
+    const existing = ctx.players.find((p) => p.islandId === free.id); // reaktivieren?
+    let p;
+    if (existing) { existing.active = true; p = existing; }
+    else {
+      const id = Math.max(0, ...ctx.players.map((x) => x.id)) + 1;
+      p = newPlayerOnIsland(ctx.game, registry, ctx.world, free.id, { id, kind: 'ai', name: AI_NAMES[(id - 1) % AI_NAMES.length] });
+      ctx.players.push(p);
+    }
+    await savePlayer(ctx.pool, p);
+    logEvent(ctx.pool, 'ai_player_enabled', { id: p.id, name: p.name, islandId: p.islandId }).catch(() => {});
+    return { ok: true, player: { id: p.id, name: p.name, islandId: p.islandId } };
+  });
+
+  // KI-Spieler abschalten (Insel bleibt bestehen, wird nur nicht mehr getickt)
+  fastify.post('/api/players/disable', async (req, reply) => {
+    const p = ctx.players.find((x) => x.id === Number(req.body?.playerId) && x.kind === 'ai');
+    if (!p) { reply.code(404); return { ok: false, error: 'KI-Spieler nicht gefunden' }; }
+    p.active = false;
+    await savePlayer(ctx.pool, p);
+    return { ok: true };
   });
 
   // KI-Berater: beantwortet Spielerfragen anhand des Spielstands (lokales LLM)

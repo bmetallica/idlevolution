@@ -765,6 +765,12 @@
   export function recenter() {
     centerOnSettlement();
   }
+  export function focusIsland(id) {
+    const isl = (map?.islands || []).find((i) => i.id === id);
+    if (!isl) return;
+    const p = project(isl.x + Math.floor(isl.w / 2), isl.y + Math.floor(isl.h / 2));
+    camera.x = p.x; camera.y = p.y;
+  }
   export function rotateView() {
     viewRot = (viewRot + 1) % 4;
     centerOnSettlement(); // Siedlung nach dem Drehen wieder zentrieren

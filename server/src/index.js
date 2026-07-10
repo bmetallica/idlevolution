@@ -8,6 +8,7 @@ import { createRegistryHolder } from './content/loader.js';
 import { loadGameConfig, logEvent } from './engine/state.js';
 import { runTick, runTicks } from './engine/tick.js';
 import { bootWorld, savePlayer } from './engine/players.js';
+import { runExecutor } from './ai/executor.js';
 import gameRoutes from './routes/game.js';
 import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
@@ -65,6 +66,7 @@ const interval = setInterval(async () => {
   try {
     for (const p of players) {
       if (p.active === false) continue;
+      if (p.kind === 'ai') runExecutor(registryHolder.registry, p, game); // KI-Zug (Stufe 1)
       const events = runTick(registryHolder.registry, p, game);
       for (const e of events) {
         logEvent(pool, e.type, { ...e.payload, player: p.id }).catch(() => {});
