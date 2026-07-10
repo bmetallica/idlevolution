@@ -106,7 +106,7 @@ export default async function gameRoutes(fastify) {
         rate: Math.round(foodRate * 1000) / 1000,
         sufficient: foodAvail + 1e-6 >= foodNeed,
       },
-      mapVersion: state.mapVersion || 0,
+      mapVersion: ctx.world?.version ?? state.mapVersion ?? 0,
       roads: [...(state.roads || [])],
       placed: state.placed || {},
       cleared: [...(state.cleared || [])],

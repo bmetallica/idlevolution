@@ -32,8 +32,9 @@
   let roadBakes = []; // Straßen offscreen je Insel gebacken (nur bei Änderung neu)
   let terrainBaked = false;
   let _terrainSig = null, _roadsSig = null; // Signaturen: nur bei echter Änderung neu backen
-  // Minimap (Pixel/Tile adaptiv, damit sie bei wachsender Karte ~150px bleibt)
-  $: MINI = map ? Math.max(2, Math.round(150 / map.width)) : 3;
+  // Minimap: interne Auflösung (min. 1 px/Tile) + fixe Anzeigegröße ~160px.
+  $: MINI = map ? Math.max(1, Math.round(200 / map.width)) : 3;
+  const miniDisp = 160;
   let miniCanvas, miniCtx, miniTerrain = null;
 
   const dispatch = createEventDispatcher();
@@ -556,7 +557,9 @@
   function onMiniClick(e) {
     if (!map) return;
     const rect = miniCanvas.getBoundingClientRect();
-    const gx = (e.clientX - rect.left) / MINI, gy = (e.clientY - rect.top) / MINI;
+    // Anzeige kann per CSS skaliert sein → über rect-Größe auf Gitter abbilden
+    const gx = ((e.clientX - rect.left) / rect.width) * map.width;
+    const gy = ((e.clientY - rect.top) / rect.height) * map.height;
     const p = project(gx, gy);
     camera.x = p.x; camera.y = p.y;
   }
@@ -828,6 +831,7 @@
         width={map.width * MINI}
         height={map.height * MINI}
         class="block cursor-pointer"
+        style="width:{miniDisp}px;height:{miniDisp}px"
         on:click={onMiniClick}
       ></canvas>
     </div>
