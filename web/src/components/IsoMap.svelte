@@ -23,14 +23,14 @@
 
   $: roadSet = new Set(roads);
   $: clearedSet = new Set(cleared);
-  let decoCanvas = null;
+  let decoBakes = []; // [{canvas, ox, oy}] je Insel
   let _decoSig = null;
   let painting = false;
   let erasing = false; // Straßen-Abriss-Modus (Rechtsklick)
   let roadStart = null; // Startfeld beim Ziehen einer geraden Straße
   let paintSet = new Set(); // während des Ziehens bearbeitete Felder (Vorschau)
-  let roadsCanvas = null; // Straßen offscreen gebacken (nur bei Änderung neu)
-  let terrainW = 0, terrainH = 0;
+  let roadBakes = []; // Straßen offscreen je Insel gebacken (nur bei Änderung neu)
+  let terrainBaked = false;
   let _terrainSig = null, _roadsSig = null; // Signaturen: nur bei echter Änderung neu backen
   // Minimap (Pixel/Tile adaptiv, damit sie bei wachsender Karte ~150px bleibt)
   $: MINI = map ? Math.max(2, Math.round(150 / map.width)) : 3;
@@ -47,73 +47,87 @@
   let dragging = false;
   let dragMoved = false;
   let lastPointer = { x: 0, y: 0 };
-  let terrainCanvas = null;
-  let terrainOff = { x: 0, y: 0 };
+  let terrainBakes = []; // [{canvas, ox, oy}] je Insel — Ozean bleibt prozedural
   const npcSystem = createNpcSystem();
 
-  // ── Terrain einmalig in einen Offscreen-Canvas rendern (statisch) ──
-  function buildTerrain() {
-    if (!map) return;
-    const off = { x: map.height * (TILE_W / 2) + TILE_W, y: TILE_H * 3 };
-    terrainOff = off;
-    const w = (map.width + map.height) * (TILE_W / 2) + TILE_W * 2;
-    const h = (map.width + map.height) * (TILE_H / 2) + TILE_H * 6;
-    terrainW = w; terrainH = h;
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    const g = c.getContext('2d');
-    // Wasser-Prüfung in Ansichts-Koordinaten (für Küstenschaum)
-    const isWaterV = (vx, vy) => { const [gx, gy] = rotInv(vx, vy); return (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height) ? true : map.legend[map.tiles[gy * map.width + gx]] === 'water'; };
-    // In Ansichts-Reihenfolge zeichnen (hinten→vorne korrekt, auch gedreht)
-    const N = nSize();
-    for (let vy = 0; vy < N; vy++) {
-      for (let vx = 0; vx < N; vx++) {
-        const [gx, gy] = rotInv(vx, vy);
-        const key = `${gx},${gy}`;
-        let t = map.legend[map.tiles[gy * map.width + gx]];
-        if ((t === 'forest' || t === 'rock') && clearedSet.has(key)) t = 'grass'; // gerodet = flaches Gras
-        const p = placed[key];
-        if (p === 'tree') t = 'forest'; // platzierte Deko hebt den Untergrund an
-        else if (p === 'rock') t = 'rock';
-        const col = TERRAIN_COLORS[t] || TERRAIN_COLORS.grass;
-        drawTile(g, vx, vy, t, col, off, isWaterV);
+  // ── Per-Insel-Rendering ──
+  // Große Mehr-Insel-Welten passen nicht in ein einziges Offscreen-Canvas.
+  // Deshalb wird jede Insel-Region in ein eigenes, kleines Canvas gebacken und
+  // an ihre Weltposition geblittet; der offene Ozean bleibt prozedural (Hintergrund).
+  const islandList = () => (map?.islands?.length ? map.islands : [{ id: 0, x: 0, y: 0, w: map.width, h: map.height }]);
+
+  // Sammelt die Tiles einer Insel (tiefen-sortiert für korrekte Überlappung) + Bildschirm-Bounding-Box.
+  function islandTiles(isl) {
+    const tiles = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let gy = isl.y; gy < isl.y + isl.h; gy++) {
+      for (let gx = isl.x; gx < isl.x + isl.w; gx++) {
+        const [vx, vy] = rotFwd(gx, gy);
+        const s = gridToScreen(vx, vy);
+        tiles.push({ gx, gy, vx, vy, sx: s.x, sy: s.y, depth: vx + vy });
+        if (s.x < minX) minX = s.x; if (s.x > maxX) maxX = s.x;
+        if (s.y < minY) minY = s.y; if (s.y > maxY) maxY = s.y;
       }
     }
-    terrainCanvas = c;
+    tiles.sort((a, b) => a.depth - b.depth);
+    // Ränder großzügig: Tiles ±TILE_W/2 breit, Bäume/Felsen ragen nach oben.
+    const box = { minX: minX - TILE_W, minY: minY - TILE_H * 5, maxX: maxX + TILE_W, maxY: maxY + TILE_H * 2 };
+    return { tiles, box };
   }
 
-  // Deko-Ebene (Bäume/Felsen) offscreen backen — respektiert placed + cleared,
-  // sodass Straßen/Gebäude Deko räumen und der Spieler welche setzen kann.
-  function bakeDeco() {
-    if (!map || !terrainW) return;
-    const c = document.createElement('canvas');
-    c.width = terrainW; c.height = terrainH;
-    const g = c.getContext('2d');
-    const N = nSize();
-    for (let vy = 0; vy < N; vy++) {
-      for (let vx = 0; vx < N; vx++) {
-        const [gx, gy] = rotInv(vx, vy);
-        const key = `${gx},${gy}`;
-        const t = map.legend[map.tiles[gy * map.width + gx]];
-        const p = placed[key];
-        let type = null, hgt = 0;
-        if (p === 'tree') { type = 'tree'; hgt = TERRAIN_COLORS.forest.h; } // auf angehobenem Untergrund
-        else if (p === 'rock') { type = 'rock'; hgt = TERRAIN_COLORS.rock.h; }
-        else if (t === 'forest' && !clearedSet.has(key)) { type = 'tree'; hgt = TERRAIN_COLORS.forest.h; }
-        else if (t === 'rock' && !clearedSet.has(key) && tileRand(gx, gy, 4) > 0.35) { type = 'rock'; hgt = TERRAIN_COLORS.rock.h; }
-        if (!type) continue;
-        const sc = gridToScreen(vx, vy); // Ansichts-Position
-        const px = sc.x + terrainOff.x, py = sc.y + terrainOff.y - hgt;
-        const jx = (tileRand(gx, gy, 1) - 0.5) * TILE_W * 0.3;
-        const jy = (tileRand(gx, gy, 2) - 0.5) * TILE_H * 0.3;
-        const r = 0.85 + tileRand(gx, gy, 3) * 0.4;
-        const seed = Math.floor(tileRand(gx, gy, 5) * 100000);
-        if (type === 'tree') drawTree(g, px + jx, py + jy, r, seed);
-        else drawRock(g, px + jx, py + jy, r, seed);
-      }
+  // Bäckt jede Insel mit einem Tile-Zeichner in ein eigenes Canvas → [{canvas, ox, oy}].
+  function bakeIslands(drawEach) {
+    const bakes = [];
+    for (const isl of islandList()) {
+      const { tiles, box } = islandTiles(isl);
+      const w = Math.max(1, Math.ceil(box.maxX - box.minX));
+      const h = Math.max(1, Math.ceil(box.maxY - box.minY));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      const off = { x: -box.minX, y: -box.minY };
+      for (const t of tiles) drawEach(g, t, off);
+      bakes.push({ canvas: c, ox: box.minX, oy: box.minY });
     }
-    decoCanvas = c;
+    return bakes;
+  }
+
+  function buildTerrain() {
+    if (!map) return;
+    const isWaterV = (vx, vy) => { const [gx, gy] = rotInv(vx, vy); return (gx < 0 || gy < 0 || gx >= map.width || gy >= map.height) ? true : map.legend[map.tiles[gy * map.width + gx]] === 'water'; };
+    terrainBakes = bakeIslands((g, t, off) => {
+      const key = `${t.gx},${t.gy}`;
+      let tt = map.legend[map.tiles[t.gy * map.width + t.gx]];
+      if ((tt === 'forest' || tt === 'rock') && clearedSet.has(key)) tt = 'grass'; // gerodet = flaches Gras
+      const p = placed[key];
+      if (p === 'tree') tt = 'forest'; else if (p === 'rock') tt = 'rock'; // platzierte Deko hebt den Untergrund
+      const col = TERRAIN_COLORS[tt] || TERRAIN_COLORS.grass;
+      drawTile(g, t.vx, t.vy, tt, col, off, isWaterV);
+    });
+    terrainBaked = true;
+  }
+
+  // Deko-Ebene (Bäume/Felsen) je Insel — respektiert placed + cleared.
+  function bakeDeco() {
+    if (!map || !terrainBaked) return;
+    decoBakes = bakeIslands((g, t, off) => {
+      const key = `${t.gx},${t.gy}`;
+      const tt = map.legend[map.tiles[t.gy * map.width + t.gx]];
+      const p = placed[key];
+      let type = null, hgt = 0;
+      if (p === 'tree') { type = 'tree'; hgt = TERRAIN_COLORS.forest.h; }
+      else if (p === 'rock') { type = 'rock'; hgt = TERRAIN_COLORS.rock.h; }
+      else if (tt === 'forest' && !clearedSet.has(key)) { type = 'tree'; hgt = TERRAIN_COLORS.forest.h; }
+      else if (tt === 'rock' && !clearedSet.has(key) && tileRand(t.gx, t.gy, 4) > 0.35) { type = 'rock'; hgt = TERRAIN_COLORS.rock.h; }
+      if (!type) return;
+      const px = t.sx + off.x, py = t.sy + off.y - hgt;
+      const jx = (tileRand(t.gx, t.gy, 1) - 0.5) * TILE_W * 0.3;
+      const jy = (tileRand(t.gx, t.gy, 2) - 0.5) * TILE_H * 0.3;
+      const r = 0.85 + tileRand(t.gx, t.gy, 3) * 0.4;
+      const seed = Math.floor(tileRand(t.gx, t.gy, 5) * 100000);
+      if (type === 'tree') drawTree(g, px + jx, py + jy, r, seed);
+      else drawRock(g, px + jx, py + jy, r, seed);
+    });
   }
 
   function diamondPath(g, cx, cy) {
@@ -292,9 +306,13 @@
     ctx.scale(camera.zoom, camera.zoom);
     ctx.translate(-camera.x, -camera.y);
 
-    if (terrainCanvas) ctx.drawImage(terrainCanvas, -terrainOff.x, -terrainOff.y);
-    if (roadsCanvas) ctx.drawImage(roadsCanvas, -terrainOff.x, -terrainOff.y);
-    if (decoCanvas) ctx.drawImage(decoCanvas, -terrainOff.x, -terrainOff.y);
+    // Per-Insel-Bakes blitten (nur sichtbare — Culling gegen den Weltausschnitt)
+    const halfW = viewW / 2 / camera.zoom + 96, halfH = viewH / 2 / camera.zoom + 96;
+    const vmnX = camera.x - halfW, vmxX = camera.x + halfW, vmnY = camera.y - halfH, vmxY = camera.y + halfH;
+    const bakeVis = (b) => b.ox < vmxX && b.ox + b.canvas.width > vmnX && b.oy < vmxY && b.oy + b.canvas.height > vmnY;
+    for (const b of terrainBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
+    for (const b of roadBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
+    for (const b of decoBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
     if (paintSet.size) drawPaintPreview();
 
     // Hover-/Bau-Vorschau
@@ -461,18 +479,28 @@
   }
   // Straßen einmal offscreen backen (nur wenn sich das Netz ändert)
   function buildRoadsCanvas() {
-    if (!map || !terrainW) return;
-    const c = document.createElement('canvas');
-    c.width = terrainW; c.height = terrainH;
-    const g = c.getContext('2d');
-    for (const key of roadSet) {
-      const ci = key.indexOf(',');
-      const gx = +key.slice(0, ci), gy = +key.slice(ci + 1);
-      const p = project(gx, gy);
-      if (map.legend[map.tiles[gy * map.width + gx]] === 'water') drawBridge(g, p.x + terrainOff.x, p.y + terrainOff.y);
-      else drawRoadShape(g, p.x + terrainOff.x, p.y + terrainOff.y, null);
+    if (!map || !terrainBaked) return;
+    roadBakes = [];
+    for (const isl of islandList()) {
+      const { box } = islandTiles(isl);
+      const w = Math.max(1, Math.ceil(box.maxX - box.minX));
+      const h = Math.max(1, Math.ceil(box.maxY - box.minY));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      let drew = false;
+      for (const key of roadSet) {
+        const ci = key.indexOf(',');
+        const gx = +key.slice(0, ci), gy = +key.slice(ci + 1);
+        if (gx < isl.x || gy < isl.y || gx >= isl.x + isl.w || gy >= isl.y + isl.h) continue; // nur Straßen dieser Insel
+        const p = project(gx, gy);
+        const px = p.x - box.minX, py = p.y - box.minY;
+        if (map.legend[map.tiles[gy * map.width + gx]] === 'water') drawBridge(g, px, py);
+        else drawRoadShape(g, px, py, null);
+        drew = true;
+      }
+      if (drew) roadBakes.push({ canvas: c, ox: box.minX, oy: box.minY });
     }
-    roadsCanvas = c;
   }
   // Live-Vorschau der gerade bearbeiteten Felder (Straße = Erde, Deko = farbige Raute)
   function drawPaintPreview() {
@@ -760,14 +788,14 @@
     if (sig !== _terrainSig) { _terrainSig = sig; buildTerrain(); bakeMini(); _roadsSig = null; _decoSig = null; }
   }
   // Deko neu backen, wenn sich placed/cleared oder die Karte ändern
-  $: if (ctx && terrainW) {
+  $: if (ctx && terrainBaked) {
     const sig = JSON.stringify(placed) + '|' + cleared.join(',') + '|' + (map?.version ?? 0) + '|' + viewRot;
     if (sig !== _decoSig) { _decoSig = sig; bakeDeco(); }
   }
   // Straßen offscreen neu backen — nur wenn sich das Netz WIRKLICH ändert.
   // (Die Komponente kann pro Frame invalidiert werden; ohne diesen Guard würde
   //  sonst jedes Frame ein großes Offscreen-Canvas neu alloziert → Latenz/GC.)
-  $: if (ctx && terrainW) {
+  $: if (ctx && terrainBaked) {
     const sig = roads.length + '#' + roads.join(',') + '|' + viewRot;
     if (sig !== _roadsSig) { _roadsSig = sig; buildRoadsCanvas(); }
   }

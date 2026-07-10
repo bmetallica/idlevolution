@@ -18,12 +18,12 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 function assembleWorld(specs, gap, seed) {
   const cols = Math.ceil(Math.sqrt(specs.length));
   const rows = Math.ceil(specs.length / cols);
-  const cellW = Math.max(...specs.map((s) => s.width));
-  const cellH = Math.max(...specs.map((s) => s.height));
-  const stepX = cellW + gap;
-  const stepY = cellH + gap;
-  const width = gap + cols * stepX;
-  const height = gap + rows * stepY;
+  const cell = Math.max(...specs.map((s) => s.width), ...specs.map((s) => s.height));
+  const stepX = cell + gap;
+  const stepY = cell + gap;
+  // Quadratische Welt: die Ansichts-Rotation (viewRot) setzt width==height voraus.
+  const size = gap + Math.max(cols, rows) * (cell + gap);
+  const width = size, height = size;
 
   const arr = new Array(width * height).fill('W');
   const islands = [];

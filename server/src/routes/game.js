@@ -156,7 +156,8 @@ export default async function gameRoutes(fastify) {
     width: ctx.state.map.width,
     height: ctx.state.map.height,
     tiles: ctx.state.map.tiles,
-    version: ctx.state.mapVersion || 0,
+    version: ctx.world?.version ?? ctx.state.mapVersion ?? 0,
+    islands: ctx.world?.islands || null, // Mehr-Insel-Welt; null → Client nutzt Einzel-Insel-Fallback
     legend: TERRAIN,
   }));
 
