@@ -203,10 +203,15 @@ export function occupiedTiles(state, registry) {
 export function canPlace(map, state, registry, def, x, y, rot = 0) {
   const { w, h } = footprintOf(def, rot);
   const allowed = def.placement?.terrain ?? DEFAULT_BUILDABLE;
+  // Optionale Territoriums-Beschränkung (Mehr-Insel-Welt): gesetzt = nur im
+  // eigenen Insel-Rechteck baubar. Ohne region unverändertes Verhalten.
+  const region = state?.region;
 
   for (let dy = 0; dy < h; dy++) {
     for (let dx = 0; dx < w; dx++) {
       if (!inBounds(map, x + dx, y + dy)) return { ok: false, reason: 'außerhalb der Karte' };
+      if (region && (x + dx < region.x || y + dy < region.y || x + dx >= region.x + region.w || y + dy >= region.y + region.h))
+        return { ok: false, reason: 'außerhalb des eigenen Territoriums' };
       const t = effectiveTerrain(map, state, x + dx, y + dy);
       // Wald/Fels darf von normalen Gebäuden (die Gras/Sand nutzen) gerodet werden
       const clearable = (t === 'forest' || t === 'rock') && (allowed.includes('grass') || allowed.includes('sand'));

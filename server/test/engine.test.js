@@ -138,6 +138,28 @@ test('Welt: N Inseln, durch Ozean getrennt, Territorium korrekt', () => {
   assert.equal(islandAt(world, 0, 0), null); // Ozean-Rand
 });
 
+test('Territorium: Bauen nur in der eigenen Insel-Region', () => {
+  const world = generateWorld(5, { islandCount: 4, islandSize: 40, gap: 16 });
+  const map = { width: world.width, height: world.height, tiles: world.tiles };
+  const def = registry.buildings.get('hut'); // Gras/Sand, keine Adjazenz
+  const isl0 = islandById(world, 0), isl1 = islandById(world, 1);
+  // Spieler „gehört" zu Insel 1
+  const state = { region: { x: isl1.x, y: isl1.y, w: isl1.w, h: isl1.h }, instances: [], placed: {}, cleared: new Set() };
+
+  // Auf der eigenen Insel (Spawn = freigeräumtes Gras) → nicht am Territorium scheitern
+  const own = canPlace(map, state, registry, def, isl1.spawn.x, isl1.spawn.y);
+  assert.ok(own.ok || own.reason !== 'außerhalb des eigenen Territoriums', `eigenes Territorium abgelehnt: ${own.reason}`);
+
+  // Auf fremder Insel (Insel 0, valides Terrain) → Territoriums-Ablehnung
+  const foreign = canPlace(map, state, registry, def, isl0.spawn.x, isl0.spawn.y);
+  assert.equal(foreign.ok, false);
+  assert.match(foreign.reason, /Territorium/);
+
+  // Ohne region (heutiges Single-Player-Verhalten) → keine Territoriums-Schranke
+  const noRegion = canPlace(map, { instances: [], placed: {}, cleared: new Set() }, registry, def, isl0.spawn.x, isl0.spawn.y);
+  assert.ok(noRegion.ok, `ohne region sollte baubar sein: ${noRegion.reason}`);
+});
+
 test('Welt: deterministisch bei gleichem Seed', () => {
   const w1 = generateWorld(7, { islandCount: 3, islandSize: 32, gap: 12 });
   const w2 = generateWorld(7, { islandCount: 3, islandSize: 32, gap: 12 });
