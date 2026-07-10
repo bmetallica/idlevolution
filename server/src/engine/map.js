@@ -302,10 +302,9 @@ export function roadCoverage(state, registry) {
   return connected / insts.length;
 }
 
-/** Findet freie, gültige Plätze nahe der Kartenmitte (Migration alter Spielstände). */
-export function findFreeSpot(map, state, registry, def) {
-  const cx = Math.floor(map.width / 2);
-  const cy = Math.floor(map.height / 2);
+/** Findet freien, gültigen Platz spiralförmig um (cx,cy) — Standard: Kartenmitte.
+ *  Respektiert state.region (Territorium), sodass die Suche auf der eigenen Insel bleibt. */
+export function findFreeSpot(map, state, registry, def, cx = Math.floor(map.width / 2), cy = Math.floor(map.height / 2)) {
   for (let r = 0; r < Math.max(map.width, map.height); r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {

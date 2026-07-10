@@ -8,6 +8,7 @@ import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity
 import { evaluateConditions } from '../src/engine/rules.js';
 import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '../src/engine/map.js';
 import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyState } from '../src/engine/world.js';
+import { newPlayerOnIsland, bootWorld } from '../src/engine/players.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const silent = { warn() {}, info() {} };
@@ -177,6 +178,42 @@ test('Migration: Alt-Insel wird als Insel 0 eingebettet, Terrain+Gebäude erhalt
   // Straße & Deko mitverschoben
   assert.ok(emb.roads.has(`${cx + 1 + isl0.x},${cy + isl0.y}`));
   assert.equal(emb.placed[`${cx + isl0.x},${cy + 1 + isl0.y}`], 'tree');
+});
+
+test('newPlayerOnIsland: Startgebäude landen auf der eigenen Insel', () => {
+  const world = { ...generateWorld(9, { islandCount: 4, islandSize: 40, gap: 16 }), version: 1 };
+  const p = newPlayerOnIsland(game, registry, world, 2, { id: 2, kind: 'ai', name: 'KI-Test' });
+  const isl = islandById(world, 2);
+  assert.equal(p.islandId, 2);
+  assert.deepEqual(p.region, { x: isl.x, y: isl.y, w: isl.w, h: isl.h });
+  assert.ok(p.instances.length >= 1, 'kein Startgebäude platziert');
+  for (const inst of p.instances) {
+    assert.ok(inst.x >= isl.x && inst.x < isl.x + isl.w && inst.y >= isl.y && inst.y < isl.y + isl.h, 'Startgebäude außerhalb der Insel');
+    assert.equal(islandAt(world, inst.x, inst.y), 2);
+  }
+});
+
+test('bootWorld: frische Welt + Spieler 0 (Mock-Pool, keine Legacy)', async () => {
+  const calls = [];
+  const pool = {
+    async query(sql) {
+      calls.push(sql.trim().split('\n')[0]);
+      if (/FROM world WHERE id = 1/.test(sql)) return { rowCount: 0, rows: [] };
+      if (/FROM game_state WHERE id = 1/.test(sql)) return { rowCount: 0, rows: [] }; // keine Legacy
+      return { rowCount: 0, rows: [] }; // saveWorld / savePlayer
+    },
+  };
+  const { world, players, migrated } = await bootWorld(pool, game, registry, { islandCount: 5, islandSize: 40, gap: 16 });
+  assert.equal(migrated, false);
+  assert.equal(world.islands.length, 5);
+  assert.equal(players.length, 1);
+  const h = players[0];
+  assert.equal(h.kind, 'human');
+  assert.equal(h.islandId, 0);
+  assert.ok(h.instances.length >= 1);
+  assert.equal(h.map.width, world.width); // geteilte Karte referenziert
+  assert.ok(calls.some((c) => /INSERT INTO world/.test(c)), 'Welt wurde gespeichert');
+  assert.ok(calls.some((c) => /INSERT INTO players/.test(c)), 'Spieler wurde gespeichert');
 });
 
 test('Territorium: Bauen nur in der eigenen Insel-Region', () => {

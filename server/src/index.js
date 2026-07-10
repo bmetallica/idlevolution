@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { pool, migrate } from './db/index.js';
 import { createRegistryHolder } from './content/loader.js';
-import { loadGameConfig, loadState, saveState, logEvent, saveMapTiles } from './engine/state.js';
+import { loadGameConfig, logEvent } from './engine/state.js';
 import { runTick, runTicks } from './engine/tick.js';
-import { growWorld, landTouchesBorder } from './engine/map.js';
+import { bootWorld, savePlayer } from './engine/players.js';
 import gameRoutes from './routes/game.js';
 import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
@@ -26,32 +26,31 @@ if (registryHolder.registry.epochs.size === 0) {
   process.exit(1);
 }
 
-const state = await loadState(pool, game, registryHolder.registry);
+// Welt + Spieler laden (migriert bestehende Single-Player-Stände beim ersten Start)
+const { world, players, migrated } = await bootWorld(pool, game, registryHolder.registry, {
+  islandCount: 5, islandSize: 44, gap: 18,
+});
+if (migrated) log.info(`Migration: Alt-Stand als Insel 0 in Mehr-Insel-Welt eingebettet (${world.width}×${world.height}, ${world.islands.length} Inseln)`);
+const human = players.find((p) => p.kind === 'human') || players[0];
 
-// Offline-Progression: verpasste Ticks seit dem letzten Speichern nachholen (Idle-Kern)
-const elapsedMs = Date.now() - state.lastTickAt;
+// Offline-Progression je aktivem Spieler: verpasste Ticks seit letztem Speichern nachholen
 const capTicks = Math.floor((config.offlineCapHours * 3600) / config.tickSeconds);
-const missedTicks = Math.min(capTicks, Math.floor(elapsedMs / 1000 / config.tickSeconds));
-if (missedTicks > 0) {
-  const events = runTicks(registryHolder.registry, state, game, missedTicks);
-  await saveState(pool, state);
-  log.info(`Offline-Progression: ${missedTicks} Ticks nachgeholt (${events.length} Ereignisse)`);
+for (const p of players) {
+  if (p.active === false) continue;
+  const missed = Math.min(capTicks, Math.floor((Date.now() - (p.lastTickAt || Date.now())) / 1000 / config.tickSeconds));
+  if (missed > 0) {
+    const events = runTicks(registryHolder.registry, p, game, missed);
+    p.lastTickAt = Date.now();
+    await savePlayer(pool, p);
+    log.info(`Offline-Progression [${p.name}]: ${missed} Ticks nachgeholt (${events.length} Ereignisse)`);
+  }
 }
 
-// Fehlt der Wasser-Rand (Insel stößt an den Rand)? → Spielfeld vergrößern.
-let guard = 0;
-while (landTouchesBorder(state.map, 2) && guard++ < 6) {
-  growWorld(state);
-  await saveMapTiles(pool, state.map);
-  await saveState(pool, state);
-  log.info(`Wasser-Rand ergänzt → Spielfeld ${state.map.width}×${state.map.height}`);
-}
-
-// ── App-Kontext für alle Routen ──
-const ctx = { config, pool, registryHolder, state, game, balance };
+// ── App-Kontext für alle Routen ── (ctx.state = menschlicher Spieler; abwärtskompatibel)
+const ctx = { config, pool, registryHolder, world, players, human, state: human, game, balance };
 fastify.decorate('gameCtx', ctx);
 
-fastify.get('/healthz', async () => ({ ok: true, tick: state.tick }));
+fastify.get('/healthz', async () => ({ ok: true, tick: human.tick }));
 await fastify.register(gameRoutes);
 await fastify.register(contentRoutes);
 await fastify.register(aiRoutes);
@@ -60,24 +59,26 @@ await fastify.register(aiRoutes);
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 await fastify.register(fastifyStatic, { root: publicDir, prefix: '/' });
 
-// ── Tick-Loop ──
+// ── Tick-Loop (über alle aktiven Spieler) ──
 let tickCounter = 0;
 const interval = setInterval(async () => {
   try {
-    const events = runTick(registryHolder.registry, state, game);
-    for (const e of events) {
-      logEvent(pool, e.type, e.payload).catch(() => {});
-      if (e.type === 'epoch_advance') {
-        log.info(`Epochen-Aufstieg: ${e.payload.from} → ${e.payload.to}`);
-        // Ganzes Spielfeld wächst (Wasserring rundum) + Insel legt einen Ring zu
-        growWorld(state);
-        await saveMapTiles(pool, state.map);
-        await saveState(pool, state);
-        log.info(`Spielfeld gewachsen auf ${state.map.width}×${state.map.height} (Version ${state.mapVersion})`);
+    for (const p of players) {
+      if (p.active === false) continue;
+      const events = runTick(registryHolder.registry, p, game);
+      for (const e of events) {
+        logEvent(pool, e.type, { ...e.payload, player: p.id }).catch(() => {});
+        if (e.type === 'epoch_advance') log.info(`Epochen-Aufstieg [${p.name}]: ${e.payload.from} → ${e.payload.to}`);
       }
     }
     tickCounter += 1;
-    if (tickCounter % config.persistEveryTicks === 0) await saveState(pool, state);
+    if (tickCounter % config.persistEveryTicks === 0) {
+      for (const p of players) {
+        if (p.active === false) continue;
+        p.lastTickAt = Date.now();
+        await savePlayer(pool, p);
+      }
+    }
   } catch (err) {
     log.error(`Tick fehlgeschlagen: ${err.message}`);
   }
@@ -85,10 +86,10 @@ const interval = setInterval(async () => {
 
 // ── Sauberes Herunterfahren: Zustand sichern ──
 const shutdown = async (signal) => {
-  log.info(`${signal} empfangen — speichere Spielstand…`);
+  log.info(`${signal} empfangen — speichere Spielstände…`);
   clearInterval(interval);
   try {
-    await saveState(pool, state);
+    for (const p of players) { p.lastTickAt = Date.now(); await savePlayer(pool, p); }
   } catch (err) {
     log.error(`Speichern beim Shutdown fehlgeschlagen: ${err.message}`);
   }

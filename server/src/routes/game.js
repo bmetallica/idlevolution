@@ -11,7 +11,8 @@ import {
 } from '../engine/tick.js';
 import { describeConditions } from '../engine/rules.js';
 import { epochsInOrder } from '../content/loader.js';
-import { logEvent, saveState } from '../engine/state.js';
+import { logEvent } from '../engine/state.js';
+import { savePlayer } from '../engine/players.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
 import { askAdvisor } from '../ai/advisor.js';
@@ -189,7 +190,7 @@ export default async function gameRoutes(fastify) {
       if (!check.ok) { reply.code(400); return { ok: false, error: 'Hier nicht drehbar: ' + check.reason }; }
     }
     inst.rot = newRot;
-    await saveState(ctx.pool, st);
+    await savePlayer(ctx.pool, st);
     return { ok: true, instanceId: inst.id, rot: newRot };
   });
 
@@ -269,7 +270,7 @@ export default async function gameRoutes(fastify) {
       const before = ctx.state.instances.length;
       ctx.state.instances = ctx.state.instances.filter((i) => reg.buildings.has(i.buildingId));
       for (const bid of Object.keys(ctx.state.buildings)) if (!reg.buildings.has(bid)) delete ctx.state.buildings[bid];
-      await saveState(ctx.pool, ctx.state);
+      await savePlayer(ctx.pool, ctx.state);
       logEvent(ctx.pool, 'pack_disabled', { packId }).catch(() => {});
       return { ok: true, packId, removedInstances: before - ctx.state.instances.length };
     } catch (err) {
@@ -291,7 +292,7 @@ export default async function gameRoutes(fastify) {
         try { setDeco(ctx.state.map, ctx.state, registry, Number(t.x), Number(t.y), type, on); changed++; }
         catch { /* einzelne ungültige Felder überspringen */ }
       }
-      await saveState(ctx.pool, ctx.state);
+      await savePlayer(ctx.pool, ctx.state);
       return { ok: true, changed };
     } catch (err) {
       reply.code(400);
