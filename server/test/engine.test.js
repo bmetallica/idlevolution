@@ -7,6 +7,7 @@ import { loadRegistry } from '../src/content/loader.js';
 import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity, computeNetRates, computeResourceFlows } from '../src/engine/tick.js';
 import { evaluateConditions } from '../src/engine/rules.js';
 import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '../src/engine/map.js';
+import { generateWorld, islandAt, islandById } from '../src/engine/world.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const silent = { warn() {}, info() {} };
@@ -106,6 +107,44 @@ test('Fluss-Aufschlüsselung summiert sich zur Netto-Rate', () => {
   const plankLabels = (flows.planks || []).map((f) => f.label);
   assert.ok(plankLabels.some((l) => /Sägewerk/.test(l)), 'Produzent fehlt');
   assert.ok(plankLabels.some((l) => /Werkzeugmacher|Toolmaker|Werkzeug/i.test(l)) || (flows.planks || []).some((f) => f.amount < 0), 'Verbraucher fehlt');
+});
+
+test('Welt: N Inseln, durch Ozean getrennt, Territorium korrekt', () => {
+  const world = generateWorld(42, { islandCount: 5, islandSize: 40, gap: 16 });
+  assert.equal(world.islands.length, 5);
+  assert.equal(world.tiles.length, world.width * world.height);
+  const tileAt = (x, y) => world.tiles[y * world.width + x];
+
+  for (const isl of world.islands) {
+    // Spawn (Insel-Mitte) ist begehbares Land (generateMap räumt die Mitte frei)
+    assert.notEqual(tileAt(isl.spawn.x, isl.spawn.y), 'W', `Insel ${isl.id}: Spawn ist Wasser`);
+    // Territoriums-Zuordnung: Spawn gehört zur eigenen Insel
+    assert.equal(islandAt(world, isl.spawn.x, isl.spawn.y), isl.id);
+    // Jede Insel enthält tatsächlich Landfläche
+    let land = 0;
+    for (let y = isl.y; y < isl.y + isl.h; y++) for (let x = isl.x; x < isl.x + isl.w; x++) if (tileAt(x, y) !== 'W') land++;
+    assert.ok(land > 100, `Insel ${isl.id}: zu wenig Land (${land})`);
+  }
+
+  // Offener Ozean zwischen Insel 0 und 1 gehört keinem (Territorium null)
+  const a = world.islands[0], b = world.islands[1];
+  if (a.y === b.y && b.x > a.x + a.w) {
+    const midX = a.x + a.w + Math.floor((b.x - (a.x + a.w)) / 2);
+    assert.equal(islandAt(world, midX, a.spawn.y), null, 'Ozean zwischen Inseln muss territoriumslos sein');
+    assert.equal(tileAt(midX, a.spawn.y), 'W');
+  }
+
+  assert.equal(islandById(world, 3)?.id, 3);
+  assert.equal(islandAt(world, 0, 0), null); // Ozean-Rand
+});
+
+test('Welt: deterministisch bei gleichem Seed', () => {
+  const w1 = generateWorld(7, { islandCount: 3, islandSize: 32, gap: 12 });
+  const w2 = generateWorld(7, { islandCount: 3, islandSize: 32, gap: 12 });
+  assert.equal(w1.tiles, w2.tiles);
+  assert.deepEqual(w1.islands, w2.islands);
+  const w3 = generateWorld(8, { islandCount: 3, islandSize: 32, gap: 12 });
+  assert.notEqual(w1.tiles, w3.tiles);
 });
 
 test('Tick: Lagerkapazität begrenzt Bestände', () => {
