@@ -6,6 +6,7 @@
   export let resourceIndex = {};
   export let activeId = null; // aktuell gewähltes Bau-Gebäude
   export let newPackIds = new Set();
+  export let mobile = false; // Mobile: unteres, horizontal scrollbares Dock statt linker Leiste
 
   const dispatch = createEventDispatcher();
 
@@ -97,6 +98,51 @@
   }
 </script>
 
+{#if mobile}
+  <!-- Mobile: unteres Dock — Reiter + horizontal scrollbare Gebäudekarten -->
+  <div class="fixed inset-x-0 bottom-0 z-30 bg-stone-950/95 backdrop-blur border-t border-stone-700 pointer-events-auto" style="padding-bottom: env(safe-area-inset-bottom);">
+    <div class="flex items-center gap-1 px-2 pt-2 pb-1 overflow-x-auto">
+      {#each tabs as tab}
+        <button
+          class="shrink-0 text-[11px] px-2.5 py-1.5 rounded {activeTab === tab.key ? 'bg-amber-800 text-amber-100' : 'bg-stone-800/70 text-stone-300'}"
+          on:click={() => (activeTab = tab.key)}
+        >{tab.label}</button>
+      {/each}
+    </div>
+    <div class="flex gap-2 px-2 pb-2 overflow-x-auto">
+      {#each shown as def (def.id)}
+        {@const lock = !unlocked(def)}
+        {@const canAfford = affordable(def)}
+        {@const flow = flowOf(def)}
+        <button
+          class="relative shrink-0 w-28 text-left rounded-lg border p-2
+            {activeId === def.id ? 'border-amber-400 bg-amber-900/30' : lock ? 'border-stone-800 bg-stone-900/50 opacity-70' : 'border-stone-700 bg-stone-900'}"
+          on:click={() => selectBuilding(def)}
+          disabled={lock}
+        >
+          {#if newPackIds.has(def._pack)}<span class="absolute -top-1 -right-1 text-[10px] bg-violet-700 rounded-full px-1">✨</span>{/if}
+          <div class="flex items-center gap-1.5">
+            <span class="text-xl leading-none">{def.icon || '🏠'}</span>
+            <span class="text-[11px] font-semibold text-stone-100 leading-tight">{def.name?.de || def.id}</span>
+          </div>
+          {#if flow}
+            <div class="flex items-center gap-0.5 text-[10px] mt-1">
+              {#each flow.ins as rid}<span class="text-red-300/90">{resIcon(rid)}</span>{/each}
+              {#if flow.ins.length}<span class="text-stone-600">→</span>{/if}
+              {#each flow.outs as rid}<span class="text-emerald-300">{resIcon(rid)}</span>{/each}
+            </div>
+          {/if}
+          <div class="mt-1 flex flex-wrap items-center gap-1 text-[10px] {canAfford ? 'text-stone-400' : 'text-red-400'}">
+            {#each Object.entries(def.cost || {}) as [rid, amt]}<span title={resName(rid)}>{resIcon(rid)}{amt}</span>{/each}
+            {#if def.workers}<span class="text-stone-600">👷{def.workers}</span>{/if}
+          </div>
+          {#if lock}<div class="text-[10px] text-amber-600/80 mt-0.5">🔒</div>{/if}
+        </button>
+      {/each}
+      {#if !shown.length}<p class="text-xs text-stone-600 px-1 py-6">Keine Gebäude in dieser Kette.</p>{/if}
+    </div>
+  </div>
+{:else}
 <div class="absolute left-0 top-12 bottom-0 z-30 w-72 flex flex-col bg-stone-950/92 backdrop-blur border-r border-stone-700 pointer-events-auto">
   <div class="px-3 py-2 border-b border-stone-800 flex items-center justify-between">
     <span class="text-sm font-semibold text-amber-200">🏗️ Bauen</span>
@@ -158,3 +204,4 @@
     {#if !shown.length}<p class="text-xs text-stone-600 px-1">Keine Gebäude in dieser Kette.</p>{/if}
   </div>
 </div>
+{/if}

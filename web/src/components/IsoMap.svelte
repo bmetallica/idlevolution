@@ -23,6 +23,8 @@
   export let ships = []; // [{id, owner, from, to, departTick, arriveTick, cargo}] unterwegs
   export let shipTick = 0; // Server-Tick (Referenz für flüssige Interpolation)
   export let tickSeconds = 5;
+  export let reticle = false; // Mobile: Bauen per zentriertem Fadenkreuz + ✓ statt Tap
+  export let erase = false; // Mobile: Radiermodus für Straßen/Deko (statt Rechtsklick)
   // Basis für die glatte Tick-Schätzung; aktualisiert, wenn ein neuer Server-Tick eintrifft
   $: if (shipTick !== rt?.shipBaseTick) { if (rt) { rt.shipBaseTick = shipTick; rt.shipBaseTime = performance.now(); } }
 
@@ -322,6 +324,9 @@
     for (const b of roadBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
     for (const b of decoBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
     if (paintSet.size) drawPaintPreview();
+
+    // Mobile: der Bau-Geist klebt am Fadenkreuz in der Bildmitte
+    if (reticle && buildDef) hover = pointerToGrid(viewW / 2, viewH / 2);
 
     // Hover-/Bau-Vorschau
     if (hover) {
@@ -736,13 +741,13 @@
     }
     if (pointers.size > 2) return;
     if (roadMode) {
-      painting = true; erasing = e.button === 2;
+      painting = true; erasing = e.button === 2 || erase;
       roadStart = pointerToGrid(e.offsetX, e.offsetY);
       paintSet = new Set(); roadLineTo(e);
       return;
     }
     if (decoType) {
-      painting = true; erasing = e.button === 2;
+      painting = true; erasing = e.button === 2 || erase;
       paintSet = new Set(); decoPaint(e);
       return;
     }
@@ -813,6 +818,7 @@
     const g = pointerToGrid(e.offsetX, e.offsetY);
     if (g.gx < 0 || g.gy < 0 || g.gx >= map.width || g.gy >= map.height) return;
     if (buildDef) {
+      if (reticle) return; // Mobile: Platzierung nur über den ✓-Button (placeAtCenter)
       const check = canPlaceClient(map, instances, defIndex, buildDef, g.gx, g.gy, buildRot);
       dispatch('place', { buildingId: buildDef.id, x: g.gx, y: g.gy, rot: buildRot, ok: check.ok, reason: check.reason });
     } else {
@@ -845,6 +851,14 @@
 
   export function recenter() {
     centerOnSettlement();
+  }
+  // Mobile: platziert das gewählte Gebäude auf dem Feld in der Bildschirmmitte (Fadenkreuz)
+  export function placeAtCenter() {
+    if (!buildDef) return;
+    const g = pointerToGrid(viewW / 2, viewH / 2);
+    if (g.gx < 0 || g.gy < 0 || g.gx >= map.width || g.gy >= map.height) return;
+    const check = canPlaceClient(map, instances, defIndex, buildDef, g.gx, g.gy, buildRot);
+    dispatch('place', { buildingId: buildDef.id, x: g.gx, y: g.gy, rot: buildRot, ok: check.ok, reason: check.reason });
   }
   export function focusIsland(id) {
     const isl = (map?.islands || []).find((i) => i.id === id);

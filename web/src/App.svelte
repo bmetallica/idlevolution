@@ -9,6 +9,11 @@
   import InfoPanel from './components/InfoPanel.svelte';
   import Chronicle from './components/Chronicle.svelte';
   import AiAssist from './components/AiAssist.svelte';
+  import { isMobile, portrait } from './lib/device.js';
+
+  let mobileMenu = false; // ausgeklapptes Menü-FAB (nur Mobile)
+  let eraseMode = false; // Radier-Umschalter für Straßen/Deko (statt Rechtsklick, nur Mobile)
+  let showBuild = false; // Bau-Dock ein-/ausklappen (nur Mobile)
 
   let content = null;
   let state = null;
@@ -231,6 +236,8 @@
       {shortages}
       {roadMode}
       {decoType}
+      reticle={$isMobile}
+      erase={eraseMode}
       ships={players?.ships || []}
       shipTick={players?.tick ?? 0}
       tickSeconds={players?.tickSeconds ?? state.tickSeconds ?? 5}
@@ -247,16 +254,19 @@
 
     <!-- Obere HUD-Leiste (über der Werkzeugleiste, damit die Ressourcen-Tooltips
          nicht von den Buttons überlagert werden) -->
-    <div class="absolute top-0 inset-x-0 z-40">
-      <ResourceBar {state} {resourceIndex} />
+    <div class="absolute top-0 inset-x-0 z-40 safe-top">
+      <ResourceBar {state} {resourceIndex} compact={$isMobile} />
     </div>
 
-    <!-- Epochen-Panel oben, rechts neben der Bau-Seitenleiste -->
-    <div class="absolute top-14 left-[19rem] z-20 w-[min(56vw,560px)]">
-      <EpochBanner {state} epochs={content.epochs} {resourceIndex} buildings={content.buildings} />
-    </div>
+    <!-- Epochen-Panel oben, rechts neben der Bau-Seitenleiste (Desktop) -->
+    {#if !$isMobile}
+      <div class="absolute top-14 left-[19rem] z-20 w-[min(56vw,560px)]">
+        <EpochBanner {state} epochs={content.epochs} {resourceIndex} buildings={content.buildings} />
+      </div>
+    {/if}
 
-    <!-- Werkzeugleiste oben rechts -->
+    <!-- Werkzeugleiste oben rechts (Desktop) -->
+    {#if !$isMobile}
     <div class="absolute top-14 right-3 z-30 flex gap-2">
       <button
         class="border rounded px-3 py-1.5 text-sm {roadMode
@@ -328,9 +338,70 @@
         🎯
       </button>
     </div>
+    {/if}
 
-    <!-- Bau-Modus-Hinweis (unten mittig — der Bereich ist jetzt frei) -->
-    {#if buildDef}
+    <!-- ══ Mobile-HUD ══ -->
+    {#if $isMobile}
+      <!-- Bau-Dock-Umschalter oben links -->
+      <div class="absolute top-2 left-2 z-40 safe-top">
+        <button class="mobile-fab {showBuild ? 'active' : ''}" on:click={() => { showBuild = !showBuild; if (showBuild) { roadMode = false; decoType = null; } }} title="Bauen">🏗️</button>
+      </div>
+
+      <!-- Menü-FAB oben rechts (Panels) -->
+      <div class="absolute top-2 right-2 z-40 flex flex-col items-end gap-2 safe-top">
+        <button class="mobile-fab {mobileMenu ? 'active' : ''}" on:click={() => (mobileMenu = !mobileMenu)} title="Menü">☰</button>
+        {#if mobileMenu}
+          <button class="mobile-fab {showPlayers ? 'active' : ''}" on:click={() => { showPlayers = !showPlayers; showMarket = showAssist = showChronicle = false; }} title="Nachbarn">🌍</button>
+          <button class="mobile-fab {showMarket ? 'active' : ''}" on:click={() => { showMarket = !showMarket; showPlayers = showAssist = showChronicle = false; }} title="Markt">🪙</button>
+          <button class="mobile-fab {showAssist ? 'active' : ''}" on:click={() => { showAssist = !showAssist; showPlayers = showMarket = showChronicle = false; }} title="Berater">💬</button>
+          <button class="mobile-fab {showChronicle ? 'active' : ''}" on:click={() => { showChronicle = !showChronicle; showPlayers = showMarket = showAssist = false; }} title="KI-Zentrale">🤖</button>
+        {/if}
+      </div>
+
+      {#if !showBuild && !buildDef}
+        <!-- Karten-Steuerung rechts -->
+        <div class="absolute right-2 bottom-4 z-40 flex flex-col gap-2">
+          <button class="mobile-fab" on:click={() => mapComp?.rotateView()} title="Ansicht drehen">🔄</button>
+          <button class="mobile-fab" on:click={() => mapComp?.recenter()} title="Zentrieren">🎯</button>
+        </div>
+
+        <!-- Bau-Werkzeuge links -->
+        <div class="absolute left-2 bottom-4 z-40 flex flex-col gap-2">
+          <button class="mobile-fab {roadMode ? 'active' : ''}" on:click={() => { roadMode = !roadMode; decoType = null; buildDef = null; selection = null; eraseMode = false; }} title="Straßen">🛤️</button>
+          <button class="mobile-fab {decoType === 'tree' ? 'active' : ''}" on:click={() => { decoType = decoType === 'tree' ? null : 'tree'; roadMode = false; buildDef = null; selection = null; eraseMode = false; }} title="Bäume">🌲</button>
+          <button class="mobile-fab {decoType === 'rock' ? 'active' : ''}" on:click={() => { decoType = decoType === 'rock' ? null : 'rock'; roadMode = false; buildDef = null; selection = null; eraseMode = false; }} title="Felsen">🪨</button>
+          {#if roadMode || decoType}
+            <button class="mobile-fab {eraseMode ? 'active' : ''}" on:click={() => (eraseMode = !eraseMode)} title="Radieren an/aus">🧹</button>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Dreh-Hinweis im Hochformat -->
+      {#if $portrait}
+        <div class="fixed inset-0 z-[100] bg-stone-950 grid place-items-center text-center p-8">
+          <div>
+            <div class="text-6xl mb-4 animate-pulse">📱 ↻</div>
+            <p class="text-lg text-stone-200 font-semibold">Bitte drehen</p>
+            <p class="text-sm text-stone-400 mt-1">Idlevolution spielt sich im <b>Querformat</b>.</p>
+          </div>
+        </div>
+      {/if}
+    {/if}
+
+    <!-- Bau-Modus-Hinweis (unten mittig — Desktop) -->
+    {#if $isMobile}
+      <!-- Mobile: Fadenkreuz + Bau-Bestätigung -->
+      {#if buildDef}
+        <div class="absolute inset-0 z-20 pointer-events-none grid place-items-center">
+          <div class="text-4xl text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">✛</div>
+        </div>
+        <div class="absolute bottom-36 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3">
+          <button class="mobile-fab" on:click={() => (buildRot = (buildRot + 1) % 4)} title="Drehen">↻</button>
+          <button class="mobile-fab active" style="width:56px;height:56px;font-size:1.5rem" on:click={() => mapComp?.placeAtCenter()} title="Bauen">✓</button>
+          <button class="mobile-fab" on:click={() => (buildDef = null)} title="Abbrechen">✕</button>
+        </div>
+      {/if}
+    {:else if buildDef}
       <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-amber-900/90 border border-amber-600 rounded-full px-4 py-1.5 text-sm whitespace-nowrap">
         🏗️ {buildDef.name?.de} platzieren — Klick setzt · <kbd>R</kbd> drehen (↻ {buildRot * 90}°) · <kbd>ESC</kbd>/Rechtsklick beendet
       </div>
@@ -347,6 +418,7 @@
     <!-- Info-Panel (Auswahl) -->
     {#if !buildDef}
       <InfoPanel
+        mobile={$isMobile}
         {selection}
         {defIndex}
         {resourceIndex}
@@ -363,7 +435,7 @@
 
     <!-- KI-Zentrale-Schublade -->
     {#if showChronicle}
-      <div class="absolute top-28 right-3 z-30 w-96 max-w-[92vw]">
+      <div class={$isMobile ? 'mobile-sheet p-2' : 'absolute top-28 right-3 z-30 w-96 max-w-[92vw]'}>
         <Chronicle
           packs={content.packs}
           on:close={() => (showChronicle = false)}
@@ -378,7 +450,7 @@
 
     <!-- Handelsmarkt-Panel (Stufe 5) -->
     {#if showMarket}
-      <div class="absolute top-28 right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-amber-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 max-h-[70vh] overflow-y-auto">
+      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute top-28 right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-amber-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 max-h-[70vh] overflow-y-auto'}>
         <div class="flex items-center gap-2 mb-2">
           <span class="text-sm font-semibold text-amber-200">🪙 Handelsmarkt</span>
           <button class="ml-auto text-stone-500 hover:text-stone-200" on:click={() => (showMarket = false)}>✕</button>
@@ -440,7 +512,7 @@
 
     <!-- Nachbarn / KI-Spieler-Panel -->
     {#if showPlayers}
-      <div class="absolute top-28 right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-sky-800 bg-stone-900/95 backdrop-blur shadow-xl p-3">
+      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute top-28 right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-sky-800 bg-stone-900/95 backdrop-blur shadow-xl p-3'}>
         <div class="flex items-center gap-2 mb-2">
           <span class="text-sm font-semibold text-sky-200">🌍 Nachbarn</span>
           <button class="ml-auto text-stone-500 hover:text-stone-200" on:click={() => (showPlayers = false)}>✕</button>
@@ -505,7 +577,7 @@
 
     <!-- KI-Berater-Panel -->
     {#if showAssist}
-      <div class="absolute top-28 right-3 z-30 w-96 max-w-[92vw]">
+      <div class={$isMobile ? 'mobile-sheet p-2' : 'absolute top-28 right-3 z-30 w-96 max-w-[92vw]'}>
         <AiAssist on:close={() => (showAssist = false)} />
       </div>
     {/if}
@@ -528,21 +600,25 @@
       </div>
     {/if}
 
-    <!-- Bau-Palette unten -->
-    <BuildPalette
-      buildings={content.buildings}
-      {state}
-      {resourceIndex}
-      activeId={buildDef?.id}
-      {newPackIds}
-      on:pick={(e) => {
-        buildDef = e.detail.def;
-        selection = null;
-        roadMode = false;
-        decoType = null;
-        buildRot = 0;
-      }}
-    />
+    <!-- Bau-Palette (Desktop: linke Leiste · Mobile: unteres Dock, per 🏗️ getoggelt) -->
+    {#if !$isMobile || showBuild}
+      <BuildPalette
+        mobile={$isMobile}
+        buildings={content.buildings}
+        {state}
+        {resourceIndex}
+        activeId={buildDef?.id}
+        {newPackIds}
+        on:pick={(e) => {
+          buildDef = e.detail.def;
+          selection = null;
+          roadMode = false;
+          decoType = null;
+          buildRot = 0;
+          if ($isMobile) showBuild = false; // Dock nach Auswahl schließen → Fadenkreuz frei
+        }}
+      />
+    {/if}
   {:else}
     <div class="absolute inset-0 grid place-items-center">
       <p class="text-stone-500 animate-pulse">Lade Siedlung…</p>

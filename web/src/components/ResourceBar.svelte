@@ -1,6 +1,7 @@
 <script>
   export let state;
   export let resourceIndex;
+  export let compact = false; // Mobile: schlanker, horizontal scrollbar, Tap statt Hover
 
   const fmt = (n) => (Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(n % 1 === 0 ? 0 : 1));
   const fmtRate = (n) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
@@ -11,11 +12,16 @@
     const left = Math.max(6, Math.min(rect.left, window.innerWidth - 250));
     hover = { r, left, top: rect.bottom + 4 };
   }
-  function leave() { hover = null; }
+  function leave() { if (!compact) hover = null; }
+  // Touch: Tippen schaltet die Aufschlüsselung um (kein Hover verfügbar)
+  function toggle(e, r) {
+    if (hover && hover.r.id === r.id) { hover = null; return; }
+    enter(e, r);
+  }
 </script>
 
-<div class="px-4 py-2 bg-stone-950/90 backdrop-blur border-b border-stone-800">
-  <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+<div class="{compact ? 'px-2 py-1' : 'px-4 py-2'} bg-stone-950/90 backdrop-blur border-b border-stone-800">
+  <div class="flex items-center gap-y-1 {compact ? 'flex-nowrap overflow-x-auto gap-x-3 text-xs' : 'flex-wrap gap-x-5 text-sm'}">
     <span class="flex items-center gap-1 {state.popTrend === 'shrinking' ? 'text-red-400' : ''}" title={state.popReason || 'Bevölkerung / Wohnraum'}>
       <span>👥</span>
       <span class="font-mono">{Math.floor(state.population)}/{state.housing}</span>
@@ -30,9 +36,10 @@
     {#each state.resources as r (r.id)}
       {@const def = resourceIndex[r.id]}
       <span
-        class="flex items-center gap-1 cursor-help"
+        class="flex items-center gap-1 cursor-help shrink-0"
         on:mouseenter={(e) => enter(e, r)}
         on:mouseleave={leave}
+        on:click={(e) => toggle(e, r)}
       >
         <span>{def?.icon || '📦'}</span>
         <span class="font-mono">{fmt(r.amount)}</span>

@@ -28,3 +28,21 @@ body {
 ::-webkit-scrollbar-thumb {
   @apply bg-stone-700 rounded;
 }
+
+/* ── Mobile-HUD-Bausteine (nur unter Touch genutzt) ── */
+.mobile-fab {
+  @apply grid place-items-center rounded-full bg-stone-900/90 border border-stone-700 text-lg shadow-lg backdrop-blur;
+  width: 44px;
+  height: 44px;
+}
+.mobile-fab.active {
+  @apply bg-amber-800 border-amber-500 text-amber-100;
+}
+/* Bottom-Sheet: unten angedocktes, scrollbares Panel */
+.mobile-sheet {
+  @apply fixed inset-x-0 bottom-0 z-40 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-stone-700 bg-stone-900/95 backdrop-blur shadow-2xl;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}

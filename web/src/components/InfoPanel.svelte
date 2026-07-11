@@ -9,6 +9,7 @@
   export let instances = [];
   export let shortages = new Set();
   export let state = null;
+  export let mobile = false;
 
   const dispatch = createEventDispatcher();
 
@@ -72,7 +73,7 @@
 </script>
 
 {#if selection}
-  <div class="absolute top-16 right-3 z-30 w-72 bg-stone-900/95 backdrop-blur border border-stone-700 rounded-lg shadow-xl">
+  <div class={mobile ? 'mobile-sheet' : 'absolute top-16 right-3 z-30 w-72 bg-stone-900/95 backdrop-blur border border-stone-700 rounded-lg shadow-xl'}>
     <div class="flex items-center justify-between px-3 py-2 border-b border-stone-800">
       <h3 class="font-semibold text-stone-100 text-sm">
         {#if def}{def.icon} {def.name?.de}{:else}{TERRAIN_LABEL[selection.terrain] || selection.terrain}{/if}
