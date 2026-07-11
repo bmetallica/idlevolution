@@ -40,7 +40,8 @@ const ARCH_RULES = [
   { a: 'sawmill', re: /(sawmill|säge|plank|brett|\bboard|lumber ?mill|carpenter|zimmer|schreiner)/ },
   { a: 'woodcutter', re: /(lumberjack|holzfäll|woodcut|forester|förster|logging|feller|\baxe\b|\bfäll)/ },
   { a: 'farm', re: /(\bfarm|feld|\bfield|grain|getreide|wheat|weizen|garden|garten|orchard|obst|acker|plantation|plantage|vineyard|weinberg|\bherb|kräuter|\bcrop|ernte|bauernhof|windmühle|windmill|bakery|bäcker|\bmill\b|mühle)/ },
-  { a: 'fishery', re: /(\bfish|fisch|harbor|harbour|hafen|\bdock|\bpier|\bsteg|\bboat|\bboot|\bnet\b|netz|whal|\bwal\b|pearl|perle|\bsalt|\bsalz)/ },
+  { a: 'harbor', re: /(harbor|harbour|hafen|\bdock|\bpier|\bsteg|jetty|anleger|\bquay|\bkai\b|wharf|marina|\bboot|\bboat)/ },
+  { a: 'fishery', re: /(\bfish|fisch|\bnet\b|netz|whal|\bwal\b|pearl|perle|\bsalt|\bsalz)/ },
   { a: 'gatherer', re: /(gather|sammler|forager|\bhunt|jäg|berry|beere|\broot|wurzel|foraging)/ },
   { a: 'market', re: /(market|markt|\btrade|handel|bazaar|basar|\bshop|kontor|guild|gilde|merchant|händler)/ },
   { a: 'temple', re: /(temple|tempel|church|kirche|shrine|schrein|monument|denkmal|altar|chapel|kapelle|cathedral|\bdom\b|pyramid)/ },
@@ -105,7 +106,7 @@ function boxCorners(c, base, height) {
   };
 }
 
-const WALL_H = { house: 20, farm: 16, woodcutter: 17, sawmill: 18, gatherer: 16, mine: 16, quarry: 12, smelter: 22, workshop: 20, fishery: 16, market: 20, temple: 26, tower: 40, warehouse: 15 };
+const WALL_H = { house: 20, farm: 16, woodcutter: 17, sawmill: 18, gatherer: 16, mine: 16, quarry: 12, smelter: 22, workshop: 20, fishery: 16, harbor: 13, market: 20, temple: 26, tower: 40, warehouse: 15 };
 function wallHeight(arch, foot) { return (WALL_H[arch] ?? 20) + foot * 3; }
 
 // ── Zeichen-Primitive ─────────────────────────────────────────────────────────
@@ -178,6 +179,39 @@ function crates(g, top, accent) {
   for (const [dx, dy] of [[-8, -3], [6, -6], [-2, 4], [10, 2]]) { g.fillStyle = shade(accent, 0.8); g.fillRect(cx + dx - 4, cy + dy - 10, 8, 6); g.strokeStyle = 'rgba(0,0,0,0.3)'; g.strokeRect(cx + dx - 4, cy + dy - 10, 8, 6); }
 }
 function net(g, x, y) { g.strokeStyle = 'rgba(230,230,220,0.7)'; g.lineWidth = 0.6; for (let i = -3; i <= 3; i++) { g.beginPath(); g.moveTo(x + i * 2, y - 8); g.lineTo(x + i * 2 + 4, y); g.stroke(); g.beginPath(); g.moveTo(x + i * 2, y - 8); g.lineTo(x + i * 2 - 4, y); g.stroke(); } }
+// Hafen-Detail: Holzsteg mit Planken, Poller, vertäutem Boot und Fass
+function bollard(g, x, y) {
+  g.fillStyle = '#4a3620'; g.fillRect(x - 1.6, y - 7, 3.2, 7);
+  g.fillStyle = '#2f2213'; g.beginPath(); g.ellipse(x, y - 7, 2.2, 1.4, 0, 0, Math.PI * 2); g.fill();
+}
+function barrel(g, x, y) {
+  g.fillStyle = '#7a4f28'; g.beginPath(); g.ellipse(x, y, 3.4, 4.8, 0, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#3a2712'; g.lineWidth = 0.8; g.stroke();
+  g.beginPath(); g.moveTo(x - 3.2, y - 1.2); g.lineTo(x + 3.2, y - 1.2); g.moveTo(x - 3.2, y + 1.4); g.lineTo(x + 3.2, y + 1.4); g.stroke();
+}
+function mooredBoat(g, x, y, accent) {
+  g.fillStyle = 'rgba(255,255,255,0.14)'; g.beginPath(); g.ellipse(x, y + 3, 12, 3.5, 0, 0, Math.PI * 2); g.fill(); // Kielwasser
+  g.fillStyle = '#5b3d22'; g.beginPath();
+  g.moveTo(x - 10, y); g.quadraticCurveTo(x, y + 6, x + 10, y); g.lineTo(x + 7, y - 3.5); g.lineTo(x - 7, y - 3.5); g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.3)'; g.lineWidth = 0.6; g.stroke();
+  g.strokeStyle = '#3a2a18'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, y - 3.5); g.lineTo(x, y - 18); g.stroke(); // Mast
+  g.fillStyle = '#efe7d3'; g.beginPath(); g.moveTo(x + 1, y - 17); g.lineTo(x + 1, y - 5); g.lineTo(x + 9, y - 7); g.closePath(); g.fill(); // Segel
+  g.fillStyle = accent; g.beginPath(); g.moveTo(x, y - 18); g.lineTo(x + 5, y - 16.5); g.lineTo(x, y - 15); g.closePath(); g.fill(); // Wimpel
+}
+function dock(g, c, cc, pal) {
+  const a = mid(cc, c.s, 0.45), b = mid(cc, c.s, 1.35); // Steg vom Gebäude ins Wasser
+  g.lineCap = 'round';
+  g.strokeStyle = '#5f4526'; g.lineWidth = 8; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+  g.strokeStyle = '#8a6a40'; g.lineWidth = 5; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+  g.strokeStyle = 'rgba(50,34,16,0.55)'; g.lineWidth = 0.9; // Planken-Fugen
+  for (let i = 1; i <= 6; i++) { const p = mid(a, b, i / 7); g.beginPath(); g.moveTo(p.x - 4.5, p.y - 1.6); g.lineTo(p.x + 4.5, p.y + 1.6); g.stroke(); }
+  g.lineCap = 'butt';
+  bollard(g, mid(a, b, 0.55).x + 6, mid(a, b, 0.55).y + 1);
+  bollard(g, b.x + 5, b.y + 1);
+  mooredBoat(g, b.x + 15, b.y + 2, pal.accent);
+  barrel(g, a.x - 8, a.y + 2);
+  barrel(g, a.x - 13, a.y + 4);
+}
 function bannerStatic(g, apex, accent) {
   g.strokeStyle = '#5b4a35'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(apex.x, apex.y); g.lineTo(apex.x, apex.y - 16); g.stroke();
   poly(g, [{ x: apex.x, y: apex.y - 16 }, { x: apex.x + 10, y: apex.y - 13 }, { x: apex.x, y: apex.y - 10 }], accent);
@@ -208,7 +242,7 @@ function drawStaticInternal(g, def, gx, gy, w, h, epochOrder, rot = 0) {
   g.beginPath(); g.ellipse(cc.x, cc.y + 2, TILE_W * 0.44 * w, TILE_H * 0.44 * h, 0, 0, Math.PI * 2); g.fill();
 
   const wH = wallHeight(arch, foot);
-  const flat = arch === 'warehouse' || arch === 'quarry';
+  const flat = arch === 'warehouse' || arch === 'quarry' || arch === 'harbor';
   const top = boxCorners(c, 0, wH);
   paintBox(g, top, pal.wall, flat);
 
@@ -216,7 +250,7 @@ function drawStaticInternal(g, def, gx, gy, w, h, epochOrder, rot = 0) {
   else if (arch !== 'quarry') doorAndWindows(g, top, pal.wall, rot);
 
   let apex = null;
-  if (arch === 'warehouse' || arch === 'quarry') flatRoof(g, top, pal.roof);
+  if (arch === 'warehouse' || arch === 'quarry' || arch === 'harbor') flatRoof(g, top, pal.roof);
   else if (arch === 'temple') domeRoof(g, top, 18 + foot * 2, pal.roof);
   else if (arch === 'tower') {
     poly(g, [top.tN, top.tE, top.tS, top.tW], shade(pal.wall, 1.05), 'rgba(0,0,0,0.18)');
@@ -240,6 +274,7 @@ function drawStaticInternal(g, def, gx, gy, w, h, epochOrder, rot = 0) {
     case 'mine': logPile(g, mid(cc, c.s, 0.8).x, mid(cc, c.s, 0.8).y); break;
     case 'quarry': for (const [dx, dy] of [[-6, 0], [4, -2], [0, 5]]) { g.fillStyle = 'rgba(150,145,132,0.9)'; g.fillRect(cc.x + dx - 3, cc.y + dy - 8, 6, 5); } break;
     case 'fishery': net(g, mid(c.s, c.e, 0.4).x, mid(c.s, c.e, 0.4).y); break;
+    case 'harbor': dock(g, c, cc, pal); break;
     case 'market': stalls(g, cc.x, mid(cc, c.s, 0.5).y, pal.accent); break;
     case 'temple': bannerStatic(g, { x: cc.x, y: cc.y - wH - 20 }, pal.accent); break;
     case 'tower': bannerStatic(g, { x: (top.tN.x + top.tS.x) / 2, y: (top.tN.y + top.tS.y) / 2 - 6 }, pal.accent); break;
