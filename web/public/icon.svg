@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Maskabler Hintergrund (Inhalt bleibt im sicheren Mittelbereich) -->
+  <rect width="512" height="512" rx="96" fill="#0c0a09"/>
+  <rect x="24" y="24" width="464" height="464" rx="76" fill="#1c1917"/>
+  <!-- Klassischer Tempel (passend zum 🏛️-Favicon) -->
+  <g fill="#d6a44a">
+    <!-- Giebel -->
+    <path d="M256 120 L392 196 L120 196 Z"/>
+    <!-- Architrav -->
+    <rect x="128" y="206" width="256" height="26" rx="4"/>
+    <!-- Säulen -->
+    <rect x="150" y="244" width="30" height="150" rx="6"/>
+    <rect x="204" y="244" width="30" height="150" rx="6"/>
+    <rect x="278" y="244" width="30" height="150" rx="6"/>
+    <rect x="332" y="244" width="30" height="150" rx="6"/>
+    <!-- Sockel -->
+    <rect x="118" y="404" width="276" height="30" rx="6"/>
+  </g>
+  <!-- Meereswelle (Insel-Bezug) -->
+  <path d="M96 452 q40 -22 80 0 t80 0 t80 0 t80 0" fill="none" stroke="#3b82a6" stroke-width="14" stroke-linecap="round"/>
+</svg>
