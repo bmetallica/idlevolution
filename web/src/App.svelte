@@ -232,6 +232,8 @@
       {roadMode}
       {decoType}
       ships={players?.ships || []}
+      shipTick={players?.tick ?? 0}
+      tickSeconds={players?.tickSeconds ?? state.tickSeconds ?? 5}
       roads={state.roads}
       placed={state.placed}
       cleared={state.cleared}

@@ -20,7 +20,11 @@
   export let placed = {}; // "x,y" -> 'tree'|'rock' (platzierte Deko)
   export let cleared = []; // ["x,y", …] gerodete Wald-/Felsfelder
   export let decoType = null; // 'tree' | 'rock' im Deko-Malmodus
-  export let ships = []; // [{id, owner, x, y, cargo}] auf dem Ozean unterwegs
+  export let ships = []; // [{id, owner, from, to, departTick, arriveTick, cargo}] unterwegs
+  export let shipTick = 0; // Server-Tick (Referenz für flüssige Interpolation)
+  export let tickSeconds = 5;
+  // Basis für die glatte Tick-Schätzung; aktualisiert, wenn ein neuer Server-Tick eintrifft
+  $: if (shipTick !== rt?.shipBaseTick) { if (rt) { rt.shipBaseTick = shipTick; rt.shipBaseTime = performance.now(); } }
 
   $: roadSet = new Set(roads);
   $: clearedSet = new Set(cleared);
@@ -289,7 +293,7 @@
   const RENDER_MS = 1000 / 30;
   const NPC_MS = 1000 / 20;
   const MINI_MS = 200;
-  const rt = { now: 0, amb: { sun: 1, night: 0, golden: 0 }, raf: 0, lastRender: 0, lastNpc: 0, lastMini: 0, lastCamKey: '' };
+  const rt = { now: 0, amb: { sun: 1, night: 0, golden: 0 }, raf: 0, lastRender: 0, lastNpc: 0, lastMini: 0, lastCamKey: '', shipBaseTick: 0, shipBaseTime: 0 };
   function render() {
     if (!ctx) return;
     rt.now = performance.now();
@@ -359,8 +363,17 @@
       else drawNpc(d.n);
     }
 
-    // Schiffe auf dem Ozean (Stufe 4)
-    for (const s of ships) if (inViewport(s.x, s.y, 40)) drawShip(s);
+    // Schiffe auf dem Ozean (Stufe 4) — Position flüssig zwischen den Ticks interpolieren
+    if (ships.length) {
+      const estTick = rt.shipBaseTick + (rt.now - rt.shipBaseTime) / 1000 / (tickSeconds || 5);
+      for (const s of ships) {
+        const span = Math.max(1, s.arriveTick - s.departTick);
+        const t = Math.max(0, Math.min(1, (estTick - s.departTick) / span));
+        const sx = s.from.x + (s.to.x - s.from.x) * t;
+        const sy = s.from.y + (s.to.y - s.from.y) * t;
+        if (inViewport(sx, sy, 40)) drawShip(s, sx, sy);
+      }
+    }
 
     drawChainOverlay();
     drawShortageBadges();
@@ -382,8 +395,8 @@
   }
 
   // Kleines Schiff auf dem Ozean (leichtes Wippen)
-  function drawShip(s) {
-    const p = project(s.x, s.y);
+  function drawShip(s, gx, gy) {
+    const p = project(gx, gy);
     const x = p.x, y = p.y + Math.sin(rt.now / 400 + s.id) * 1.5;
     ctx.save();
     ctx.translate(x, y);

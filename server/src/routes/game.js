@@ -14,7 +14,7 @@ import { epochsInOrder } from '../content/loader.js';
 import { logEvent } from '../engine/state.js';
 import { savePlayer, newPlayerOnIsland, saveWorld } from '../engine/players.js';
 import { planTurn } from '../ai/strategist.js';
-import { createShipment, shipPosition, findHarbor } from '../engine/ships.js';
+import { createShipment, findHarbor } from '../engine/ships.js';
 import { createOffer, acceptOffer, cancelOffer } from '../engine/trade.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
@@ -266,10 +266,12 @@ export default async function gameRoutes(fastify) {
         chronicle: p.plan?.chronicle || null,
         instances: (p.instances || []).map((i) => ({ id: i.id, buildingId: i.buildingId, x: i.x, y: i.y, rot: i.rot ?? 0, done: !!i.counted, owner: p.id })),
       })),
-      ships: (ctx.world?.ships || []).map((s) => {
-        const pos = shipPosition(s, ctx.human?.tick ?? 0);
-        return { id: s.id, owner: s.owner, toOwner: s.toOwner, x: pos.x, y: pos.y, cargo: s.cargo };
-      }),
+      tickSeconds: ctx.config.tickSeconds,
+      // Rohdaten → der Client interpoliert die Position flüssig zwischen den Ticks
+      ships: (ctx.world?.ships || []).map((s) => ({
+        id: s.id, owner: s.owner, toOwner: s.toOwner, cargo: s.cargo,
+        from: s.from, to: s.to, departTick: s.departTick, arriveTick: s.arriveTick,
+      })),
     };
   });
 
