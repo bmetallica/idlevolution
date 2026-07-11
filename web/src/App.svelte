@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi } from './lib/api.js';
+  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip } from './lib/api.js';
   import { buildChainIndex, computeShortages } from './lib/chains.js';
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
@@ -36,6 +36,16 @@
   async function removeAi(id) {
     aiBusy = true;
     try { await disableAi(id); await loadPlayers(); } catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  // Ware verschiffen
+  let sendTo = null, sendRes = '', sendAmt = 50;
+  $: humanHarbor = (players?.players || []).find((p) => p.id === 0)?.harbor;
+  async function sendGoods() {
+    if (!sendTo || !sendRes || !(sendAmt > 0) || aiBusy) return;
+    aiBusy = true;
+    try { await sendShip(sendTo, sendRes, sendAmt); showFlash(`📦 ${sendAmt}× ${resourceIndex[sendRes]?.name?.de || sendRes} verschifft`); await loadPlayers(); }
+    catch (e) { showFlash(e.message, false); }
     aiBusy = false;
   }
   // Rangliste: nach Bevölkerung, dann Gebäudezahl (für den Vergleich im 🌍-Panel)
@@ -197,6 +207,7 @@
       {shortages}
       {roadMode}
       {decoType}
+      ships={players?.ships || []}
       roads={state.roads}
       placed={state.placed}
       cleared={state.cleared}
@@ -357,6 +368,32 @@
               </div>
             {/each}
           </div>
+          <!-- Ware verschiffen (Stufe 4) -->
+          <div class="mt-2.5 pt-2 border-t border-stone-800">
+            {#if humanHarbor}
+              {@const dests = players.players.filter((p) => p.id !== 0 && p.active && p.harbor)}
+              {#if dests.length}
+                <div class="text-[11px] text-stone-400 mb-1">📦 Ware verschiffen</div>
+                <div class="flex gap-1">
+                  <select bind:value={sendTo} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
+                    <option value={null}>Ziel…</option>
+                    {#each dests as p}<option value={p.islandId}>{p.name}</option>{/each}
+                  </select>
+                  <select bind:value={sendRes} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
+                    <option value="">Ware…</option>
+                    {#each (state?.resources || []).filter((r) => r.amount >= 1) as r}<option value={r.id}>{resourceIndex[r.id]?.icon || ''} {resourceIndex[r.id]?.name?.de || r.id}</option>{/each}
+                  </select>
+                  <input type="number" min="1" bind:value={sendAmt} class="w-14 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
+                  <button class="rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-2 text-white" on:click={sendGoods} disabled={aiBusy || !sendTo || !sendRes} title="Verschiffen">➤</button>
+                </div>
+              {:else}
+                <p class="text-[11px] text-stone-500">Kein Nachbar mit ⚓ Hafen — noch kein Ziel zum Verschiffen.</p>
+              {/if}
+            {:else}
+              <p class="text-[11px] text-stone-500">Baue einen ⚓ <b>Hafen</b>, um Waren zu anderen Inseln zu verschiffen.</p>
+            {/if}
+          </div>
+
           {#if (players.players.filter((p) => p.kind === 'ai').length) < (players.maxAi ?? 4)}
             <button class="mt-2.5 w-full rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-50 px-3 py-1.5 text-sm text-white" on:click={addAi} disabled={aiBusy || !(players.freeSlots || []).length}>
               ➕ KI-Spieler zuschalten

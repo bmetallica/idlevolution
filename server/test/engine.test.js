@@ -10,6 +10,7 @@ import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '
 import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyState } from '../src/engine/world.js';
 import { newPlayerOnIsland, bootWorld } from '../src/engine/players.js';
 import { runExecutor } from '../src/ai/executor.js';
+import { createShipment, tickShips, shipPosition, findHarbor } from '../src/engine/ships.js';
 import { _parsePlan } from '../src/ai/strategist.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
@@ -216,6 +217,44 @@ test('bootWorld: frische Welt + Spieler 0 (Mock-Pool, keine Legacy)', async () =
   assert.equal(h.map.width, world.width); // geteilte Karte referenziert
   assert.ok(calls.some((c) => /INSERT INTO world/.test(c)), 'Welt wurde gespeichert');
   assert.ok(calls.some((c) => /INSERT INTO players/.test(c)), 'Spieler wurde gespeichert');
+});
+
+test('Schiffe: Lieferung zieht ab, fährt, liefert bei Ankunft aus', () => {
+  const world = { ships: [], nextShipId: 1, islands: [] };
+  const a = { id: 0, islandId: 0, resources: { wood: 100 }, instances: [{ id: 1, buildingId: 'harbor', x: 10, y: 10, counted: true }] };
+  const b = { id: 1, islandId: 1, active: true, resources: { wood: 0 }, instances: [{ id: 2, buildingId: 'harbor', x: 90, y: 30, counted: true }] };
+  const players = [a, b];
+  assert.ok(findHarbor(a) && findHarbor(b));
+
+  const ship = createShipment(world, players, a, 1, 'wood', 40, 0);
+  assert.equal(a.resources.wood, 60, 'Ladung nicht abgezogen');
+  assert.equal(world.ships.length, 1);
+  assert.ok(ship.arriveTick > 0);
+
+  // Position wandert von A nach B
+  const pStart = shipPosition(ship, ship.departTick);
+  const pMid = shipPosition(ship, Math.floor((ship.departTick + ship.arriveTick) / 2));
+  assert.ok(Math.abs(pStart.x - 10) < 1e-6);
+  assert.ok(pMid.x > 10 && pMid.x < 90);
+
+  // Vor Ankunft: nichts geliefert
+  assert.equal(tickShips(world, players, ship.arriveTick - 1).length, 0);
+  assert.equal(b.resources.wood, 0);
+  // Bei Ankunft: ausgeliefert + Schiff entfernt
+  const delivered = tickShips(world, players, ship.arriveTick);
+  assert.equal(delivered.length, 1);
+  assert.equal(b.resources.wood, 40);
+  assert.equal(world.ships.length, 0);
+});
+
+test('Schiffe: Fehler bei fehlendem Hafen / eigener Insel / zu wenig Ware', () => {
+  const world = { ships: [] };
+  const a = { id: 0, islandId: 0, resources: { wood: 5 }, instances: [{ id: 1, buildingId: 'harbor', x: 0, y: 0, counted: true }] };
+  const b = { id: 1, islandId: 1, active: true, resources: {}, instances: [] }; // kein Hafen
+  assert.throws(() => createShipment(world, [a, b], a, 1, 'wood', 3, 0), /Hafen/);
+  assert.throws(() => createShipment(world, [a, b], a, 0, 'wood', 3, 0), /eigene Insel/);
+  b.instances = [{ id: 2, buildingId: 'harbor', x: 50, y: 0, counted: true }];
+  assert.throws(() => createShipment(world, [a, b], a, 1, 'wood', 99, 0), /Nicht genug/);
 });
 
 test('Stratege: LLM-Plan wird robust geparst und validiert', () => {

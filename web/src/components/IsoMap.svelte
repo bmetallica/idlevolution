@@ -20,6 +20,7 @@
   export let placed = {}; // "x,y" -> 'tree'|'rock' (platzierte Deko)
   export let cleared = []; // ["x,y", …] gerodete Wald-/Felsfelder
   export let decoType = null; // 'tree' | 'rock' im Deko-Malmodus
+  export let ships = []; // [{id, owner, x, y, cargo}] auf dem Ozean unterwegs
 
   $: roadSet = new Set(roads);
   $: clearedSet = new Set(cleared);
@@ -358,6 +359,9 @@
       else drawNpc(d.n);
     }
 
+    // Schiffe auf dem Ozean (Stufe 4)
+    for (const s of ships) if (inViewport(s.x, s.y, 40)) drawShip(s);
+
     drawChainOverlay();
     drawShortageBadges();
 
@@ -375,6 +379,25 @@
     // Neuzeichnung pro Frame. Bei Kamerabewegung sofort aktualisieren (Ausschnittsrahmen).
     const camKey = `${camera.x}|${camera.y}|${camera.zoom}`;
     if (now - rt.lastMini >= MINI_MS || camKey !== rt.lastCamKey) { rt.lastMini = now; rt.lastCamKey = camKey; drawMini(); }
+  }
+
+  // Kleines Schiff auf dem Ozean (leichtes Wippen)
+  function drawShip(s) {
+    const p = project(s.x, s.y);
+    const x = p.x, y = p.y + Math.sin(rt.now / 400 + s.id) * 1.5;
+    ctx.save();
+    ctx.translate(x, y);
+    // Kielwasser
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath(); ctx.ellipse(0, 3, 11, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+    // Rumpf
+    ctx.fillStyle = '#6b4a2b';
+    ctx.beginPath(); ctx.moveTo(-9, 0); ctx.quadraticCurveTo(0, 6, 9, 0); ctx.lineTo(6, -3); ctx.lineTo(-6, -3); ctx.closePath(); ctx.fill();
+    // Mast + Segel
+    ctx.strokeStyle = '#3a2a18'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(0, -16); ctx.stroke();
+    ctx.fillStyle = '#f2ecda';
+    ctx.beginPath(); ctx.moveTo(1, -15); ctx.lineTo(1, -4); ctx.lineTo(9, -6); ctx.closePath(); ctx.fill();
+    ctx.restore();
   }
 
   // Mittelpunkt eines Gebäudes (leicht angehoben, damit Linien am Körper andocken)

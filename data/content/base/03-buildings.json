@@ -7,6 +7,24 @@
   },
   "buildings": [
     {
+      "id": "harbor",
+      "name": { "de": "Hafen", "en": "Harbor" },
+      "description": { "de": "Verschifft Waren zu anderen Inseln — Grundlage für Handel. Braucht Wasser in der Nähe." },
+      "category": "civic",
+      "epoch": "stone_age",
+      "icon": "⚓",
+      "cost": { "wood": 40, "stone": 20 },
+      "buildTimeTicks": 10,
+      "workers": 2,
+      "production": { "inputs": {}, "outputs": {} },
+      "storage": null,
+      "housing": null,
+      "requires": null,
+      "maxCount": null,
+      "meta": { "art": { "shape": "harbor" } },
+      "placement": { "terrain": ["grass", "sand"], "adjacent": { "water": 2 }, "size": { "w": 2, "h": 1 } }
+    },
+    {
       "id": "hut",
       "name": {
         "de": "Hütte",

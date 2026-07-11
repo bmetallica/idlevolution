@@ -51,6 +51,12 @@ export const askAssist = (question) =>
   }).then(json);
 
 export const fetchPlayers = () => fetch('/api/players').then(json);
+export const sendShip = (toIsland, resourceId, amount) =>
+  fetch('/api/ship', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ toIsland, resourceId, amount }),
+  }).then(json);
 export const enableAi = () => fetch('/api/players/enable', { method: 'POST' }).then(json);
 export const disableAi = (playerId) =>
   fetch('/api/players/disable', {

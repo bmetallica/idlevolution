@@ -12,8 +12,9 @@ import {
 import { describeConditions } from '../engine/rules.js';
 import { epochsInOrder } from '../content/loader.js';
 import { logEvent } from '../engine/state.js';
-import { savePlayer, newPlayerOnIsland } from '../engine/players.js';
+import { savePlayer, newPlayerOnIsland, saveWorld } from '../engine/players.js';
 import { planTurn } from '../ai/strategist.js';
+import { createShipment, shipPosition, findHarbor } from '../engine/ships.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
 import { askAdvisor } from '../ai/advisor.js';
@@ -252,17 +253,35 @@ export default async function gameRoutes(fastify) {
     return {
       islands: ctx.world?.islands || [],
       maxAi: 4,
+      tick: ctx.human?.tick ?? 0,
       freeSlots: (ctx.world?.islands || []).filter((isl) => !ctx.players.some((p) => p.islandId === isl.id && p.active !== false)).map((isl) => isl.id),
       players: ctx.players.map((p) => ({
         id: p.id, kind: p.kind, name: p.name, islandId: p.islandId, active: p.active !== false,
         population: Math.round(p.population), epoch: currentEpoch(registry, p)?.name?.de || null,
         buildings: (p.instances || []).filter((i) => i.counted).length,
+        harbor: !!findHarbor(p),
         strategy: p.plan?.strategy || null,
         personality: p.plan?.personality || null,
         chronicle: p.plan?.chronicle || null,
         instances: (p.instances || []).map((i) => ({ id: i.id, buildingId: i.buildingId, x: i.x, y: i.y, rot: i.rot ?? 0, done: !!i.counted, owner: p.id })),
       })),
+      ships: (ctx.world?.ships || []).map((s) => {
+        const pos = shipPosition(s, ctx.human?.tick ?? 0);
+        return { id: s.id, owner: s.owner, toOwner: s.toOwner, x: pos.x, y: pos.y, cargo: s.cargo };
+      }),
     };
+  });
+
+  // Ware zu einer anderen Insel verschiffen (Stufe 4) — vom menschlichen Spieler
+  fastify.post('/api/ship', async (req, reply) => {
+    const { toIsland, resourceId, amount } = req.body || {};
+    try {
+      const ship = createShipment(ctx.world, ctx.players, ctx.human, Number(toIsland), resourceId, Number(amount), ctx.human?.tick ?? 0);
+      await savePlayer(ctx.pool, ctx.human);
+      await saveWorld(ctx.pool, ctx.world);
+      logEvent(ctx.pool, 'ship_sent', { to: ship.toOwner, cargo: ship.cargo }).catch(() => {});
+      return { ok: true, ship: { id: ship.id, arriveTick: ship.arriveTick } };
+    } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
   });
 
   // KI-Spieler auf einer freien Insel zuschalten (max. 4)
