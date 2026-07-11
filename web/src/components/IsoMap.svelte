@@ -53,6 +53,8 @@
   let dragging = false;
   let dragMoved = false;
   let lastPointer = { x: 0, y: 0 };
+  const pointers = new Map(); // pointerId -> {x,y}: aktive Zeiger (Multi-Touch)
+  let pinch = null; // {dist, cx, cy}: Zwei-Finger-Geste (Pinch-Zoom + Schwenk)
   let terrainBakes = []; // [{canvas, ox, oy}] je Insel — Ozean bleibt prozedural
   const npcSystem = createNpcSystem();
 
@@ -716,7 +718,23 @@
     hover = g.gx >= 0 && g.gy >= 0 && g.gx < map.width && g.gy < map.height ? g : null;
     if (decoValid(g.gx, g.gy)) paintSet.add(`${g.gx},${g.gy}`);
   }
+  // ── Zwei-Finger-Geste (Pinch-Zoom + Schwenk) ──
+  function startPinch() {
+    const pts = [...pointers.values()];
+    const dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
+    pinch = { dist: Math.hypot(dx, dy) || 1, cx: (pts[0].x + pts[1].x) / 2, cy: (pts[0].y + pts[1].y) / 2 };
+  }
   function onPointerDown(e) {
+    canvas.setPointerCapture?.(e.pointerId);
+    pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+    if (pointers.size === 2) {
+      // Zweiter Finger → laufendes Malen/Schwenken abbrechen und Pinch beginnen
+      painting = false; dragging = false; paintSet = new Set(); roadStart = null; erasing = false;
+      dragMoved = true; // kein Tap nach der Geste
+      startPinch();
+      return;
+    }
+    if (pointers.size > 2) return;
     if (roadMode) {
       painting = true; erasing = e.button === 2;
       roadStart = pointerToGrid(e.offsetX, e.offsetY);
@@ -733,6 +751,23 @@
     lastPointer = { x: e.offsetX, y: e.offsetY };
   }
   function onPointerMove(e) {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+    if (pinch && pointers.size >= 2) {
+      const pts = [...pointers.values()];
+      const dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const cx = (pts[0].x + pts[1].x) / 2, cy = (pts[0].y + pts[1].y) / 2;
+      const before = screenToWorld(cx, cy);
+      camera.zoom = Math.min(2.5, Math.max(0.35, camera.zoom * (dist / pinch.dist)));
+      const after = screenToWorld(cx, cy);
+      camera.x += before.x - after.x; // Zoom um den Gesten-Mittelpunkt
+      camera.y += before.y - after.y;
+      camera.x -= (cx - pinch.cx) / camera.zoom; // Schwenk mit dem Mittelpunkt
+      camera.y -= (cy - pinch.cy) / camera.zoom;
+      pinch = { dist, cx, cy };
+      hover = null;
+      return;
+    }
     if (painting) {
       if (roadMode) roadLineTo(e); else decoPaint(e);
       return;
@@ -749,6 +784,16 @@
     hover = g.gx >= 0 && g.gy >= 0 && g.gx < map.width && g.gy < map.height ? g : null;
   }
   function onPointerUp(e) {
+    pointers.delete(e.pointerId);
+    canvas.releasePointerCapture?.(e.pointerId);
+    if (pinch) {
+      if (pointers.size < 2) pinch = null;
+      if (pointers.size === 1) { // verbleibenden Finger als neuen Schwenk-Anker (kein Sprung, kein Tap)
+        const [p] = [...pointers.values()];
+        lastPointer = { x: p.x, y: p.y }; dragging = true; dragMoved = true;
+      }
+      return;
+    }
     if (painting) {
       painting = false;
       const tiles = [...paintSet].map((k) => { const c = k.indexOf(','); return { x: +k.slice(0, c), y: +k.slice(c + 1) }; });
@@ -854,12 +899,16 @@
 >
   <canvas
     bind:this={canvas}
+    class="touch-none"
     on:wheel={onWheel}
     on:pointerdown={onPointerDown}
     on:pointermove={onPointerMove}
     on:pointerup={onPointerUp}
+    on:pointercancel={onPointerUp}
     on:pointerleave={(e) => {
+      if (pointers.size > 1) return; // Multi-Touch nicht durch einen verlassenden Finger stören
       if (painting) onPointerUp(e);
+      pointers.delete(e.pointerId);
       dragging = false;
       hover = null;
     }}

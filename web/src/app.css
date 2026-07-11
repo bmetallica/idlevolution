@@ -2,6 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Volle Höhe inkl. mobiler Browser-Leiste (dynamische Viewport-Höhe),
+   kein Gummiband-Scrollen / Overscroll auf Touch. Desktop unberührt. */
+html,
+body,
+#app {
+  height: 100%;
+}
+@supports (height: 100dvh) {
+  html,
+  body,
+  #app {
+    height: 100dvh;
+  }
+}
+html,
+body {
+  overscroll-behavior: none;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
