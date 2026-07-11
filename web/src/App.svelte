@@ -38,6 +38,10 @@
     try { await disableAi(id); await loadPlayers(); } catch (e) { showFlash(e.message, false); }
     aiBusy = false;
   }
+  // Rangliste: nach Bevölkerung, dann Gebäudezahl (für den Vergleich im 🌍-Panel)
+  $: rankedPlayers = players
+    ? [...players.players].sort((a, b) => (b.population - a.population) || (b.buildings - a.buildings))
+    : [];
   // Alle Instanzen (Mensch detailliert aus state + KI-Inseln aus /api/players) für die Weltansicht
   $: allInstances = [
     ...((state?.instances) || []),
@@ -337,8 +341,9 @@
         </div>
         {#if players}
           <div class="space-y-1.5">
-            {#each players.players as p}
-              <div class="flex items-center gap-2 rounded border border-stone-700 bg-stone-800/60 px-2 py-1.5 text-sm">
+            {#each rankedPlayers as p, i}
+              <div class="flex items-center gap-2 rounded border px-2 py-1.5 text-sm {p.kind === 'human' ? 'border-emerald-800/70 bg-emerald-950/30' : 'border-stone-700 bg-stone-800/60'}">
+                <span class="text-xs font-mono text-stone-500 w-4 text-right">{i + 1}</span>
                 <span>{p.kind === 'human' ? '🧑' : '🤖'}</span>
                 <button class="text-left flex-1 min-w-0" title="Zur Insel springen" on:click={() => mapComp?.focusIsland?.(p.islandId)}>
                   <div class="text-stone-200 truncate">{p.name}{p.kind === 'human' ? ' (du)' : ''}{#if p.personality}<span class="text-[10px] text-sky-400/80"> · {p.personality}</span>{/if}</div>
