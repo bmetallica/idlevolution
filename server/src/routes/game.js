@@ -13,6 +13,7 @@ import { describeConditions } from '../engine/rules.js';
 import { epochsInOrder } from '../content/loader.js';
 import { logEvent } from '../engine/state.js';
 import { savePlayer, newPlayerOnIsland } from '../engine/players.js';
+import { planTurn } from '../ai/strategist.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
 import { askAdvisor } from '../ai/advisor.js';
@@ -230,6 +231,21 @@ export default async function gameRoutes(fastify) {
   // ── Spieler/KI-Verwaltung (Mehr-Insel-Welt) ──
   const AI_NAMES = ['Nordmark', 'Sturmfels', 'Goldbucht', 'Wyrmspitze', 'Silbertal', 'Eisenhort'];
 
+  // Plan eines KI-Spielers via LLM (Stufe 2) erstellen + persistieren. Fehler schlucken.
+  async function planFor(p) {
+    if (p.kind !== 'ai' || p.active === false) return false;
+    try {
+      const plan = await planTurn(ctx.registryHolder.registry, p, ctx.game, ctx.config.llm);
+      p.plan = plan;
+      await savePlayer(ctx.pool, p);
+      logEvent(ctx.pool, 'ai_plan', { id: p.id, name: p.name, strategy: plan.strategy, queue: plan.buildQueue.length, chronicle: plan.chronicle }).catch(() => {});
+      return true;
+    } catch (err) {
+      ctx.registryHolder.log?.warn?.(`KI-Plan für ${p.name} fehlgeschlagen: ${err.message}`);
+      return false;
+    }
+  }
+
   // Liste aller Spieler + Inseln + Render-Instanzen aller Inseln (für die Weltansicht)
   fastify.get('/api/players', async () => {
     const { registry } = ctx.registryHolder;
@@ -241,6 +257,9 @@ export default async function gameRoutes(fastify) {
         id: p.id, kind: p.kind, name: p.name, islandId: p.islandId, active: p.active !== false,
         population: Math.round(p.population), epoch: currentEpoch(registry, p)?.name?.de || null,
         buildings: (p.instances || []).filter((i) => i.counted).length,
+        strategy: p.plan?.strategy || null,
+        personality: p.plan?.personality || null,
+        chronicle: p.plan?.chronicle || null,
         instances: (p.instances || []).map((i) => ({ id: i.id, buildingId: i.buildingId, x: i.x, y: i.y, rot: i.rot ?? 0, done: !!i.counted, owner: p.id })),
       })),
     };
@@ -262,7 +281,19 @@ export default async function gameRoutes(fastify) {
     }
     await savePlayer(ctx.pool, p);
     logEvent(ctx.pool, 'ai_player_enabled', { id: p.id, name: p.name, islandId: p.islandId }).catch(() => {});
+    planFor(p).catch(() => {}); // initiale Strategie im Hintergrund holen
     return { ok: true, player: { id: p.id, name: p.name, islandId: p.islandId } };
+  });
+
+  // Alle KI-Spieler neu planen lassen (Stufe 2). Token-geschützt — der nächtliche
+  // ai-worker ruft das nach der Content-Generierung auf. Läuft asynchron.
+  fastify.post('/api/players/plan', async (req, reply) => {
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const tok = req.headers['x-ai-token'] || req.body?.token || bearer;
+    if (!ctx.config.aiImportToken || tok !== ctx.config.aiImportToken) { reply.code(401); return { ok: false, error: 'nicht autorisiert' }; }
+    const ais = ctx.players.filter((p) => p.kind === 'ai' && p.active !== false);
+    (async () => { for (const p of ais) await planFor(p); })().catch(() => {});
+    return { ok: true, planning: ais.length };
   });
 
   // KI-Spieler abschalten (Insel bleibt bestehen, wird nur nicht mehr getickt)

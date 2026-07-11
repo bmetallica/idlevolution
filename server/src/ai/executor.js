@@ -121,7 +121,20 @@ function chooseBuild(registry, player, game) {
       if (!hasProducer(rid) || (rates[rid] || 0) < RAW_TARGET) { const p = producerOf(rid); if (p) return p; }
     }
     const epoch = currentEpoch(registry, player);
-    // C3) STUFEN-BEDÜRFNISSE ZUERST (halten die Bevölkerung zufrieden) — inkl. Vorkette.
+    // PLAN) LLM-Bauplan des Strategen abarbeiten (Stufe 2), auf dem Sicherheitsnetz
+    //       (Nahrung/Baumaterial) aufsetzend: nächstes offenes Ziel bauen; ist es
+    //       noch nicht baubar, dessen fehlende Kosten-Vorkette sichern.
+    const q = (player.plan?.buildQueue || []).find((it) => it.count > 0);
+    if (q) {
+      const def = cands.find((c) => c.id === q.buildingId && staffable(c));
+      if (def) return def;
+      const target = registry.buildings.get(q.buildingId);
+      if (target) for (const [rid, amt] of Object.entries(target.cost || {})) {
+        if (registry.resources.get(rid)?.category === 'food') continue;
+        if ((player.resources[rid] || 0) < amt) { const d = nextForResource(rid); if (d) return d; }
+      }
+    }
+    // C3) STUFEN-BEDÜRFNISSE (halten die Bevölkerung zufrieden) — inkl. Vorkette.
     //     Muss vor dem Aufstieg kommen, sonst kollabiert die Bevölkerung in der neuen Ära.
     for (const [rid, perPop] of Object.entries(epoch?.needs || {})) {
       const short = (rates[rid] || 0) <= 0 || (player.resources[rid] || 0) < player.population * perPop * 8;
@@ -164,6 +177,8 @@ export function runExecutor(registry, player, game) {
   if (!spot) return;
   try {
     startBuild(registry, player, game, def.id, spot.x, spot.y, 0);
+    const it = (player.plan?.buildQueue || []).find((x) => x.buildingId === def.id && x.count > 0);
+    if (it) it.count -= 1; // Plan-Fortschritt
     autoAssignWorkers(registry, player); // neues Gebäude ggf. gleich besetzen
   } catch {
     // Platzierung/Leistbarkeit kann sich zwischen Prüfung und Bau ändern — ignorieren

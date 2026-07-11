@@ -341,8 +341,10 @@
               <div class="flex items-center gap-2 rounded border border-stone-700 bg-stone-800/60 px-2 py-1.5 text-sm">
                 <span>{p.kind === 'human' ? '🧑' : '🤖'}</span>
                 <button class="text-left flex-1 min-w-0" title="Zur Insel springen" on:click={() => mapComp?.focusIsland?.(p.islandId)}>
-                  <div class="text-stone-200 truncate">{p.name}{p.kind === 'human' ? ' (du)' : ''}</div>
+                  <div class="text-stone-200 truncate">{p.name}{p.kind === 'human' ? ' (du)' : ''}{#if p.personality}<span class="text-[10px] text-sky-400/80"> · {p.personality}</span>{/if}</div>
                   <div class="text-[11px] text-stone-500">Insel {p.islandId} · 👥 {p.population} · {p.epoch || '—'} · 🏠 {p.buildings}</div>
+                  {#if p.strategy}<div class="text-[11px] text-sky-300/80 truncate" title={p.strategy}>🎯 {p.strategy}</div>{/if}
+                  {#if p.chronicle}<div class="text-[11px] text-stone-400 italic truncate" title={p.chronicle}>„{p.chronicle}"</div>{/if}
                 </button>
                 {#if p.kind === 'ai'}
                   <button class="text-xs text-stone-500 hover:text-red-300" title="KI abschalten" on:click={() => removeAi(p.id)} disabled={aiBusy}>⏻</button>

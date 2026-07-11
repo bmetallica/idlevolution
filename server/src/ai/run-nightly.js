@@ -54,6 +54,14 @@ export async function runNightly(log = console) {
     run: { export: exportData, rawResponse: generated.raw, model: config.llm.model },
   });
 
+  // Nach der Content-Generierung: KI-Spieler ihre Tagesstrategie neu planen lassen (Stufe 2)
+  try {
+    const pl = await api('POST', '/api/players/plan', {});
+    if (pl?.planning) log.info?.(`[nightly] ${pl.planning} KI-Spieler neu geplant`);
+  } catch (err) {
+    log.warn?.(`[nightly] KI-Planung übersprungen: ${err.message}`);
+  }
+
   if (result.status === 'rejected') {
     log.warn?.(`[nightly] Pack abgelehnt: ${JSON.stringify(result.rejected).slice(0, 500)}`);
   } else {

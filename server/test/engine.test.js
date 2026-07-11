@@ -10,6 +10,7 @@ import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '
 import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyState } from '../src/engine/world.js';
 import { newPlayerOnIsland, bootWorld } from '../src/engine/players.js';
 import { runExecutor } from '../src/ai/executor.js';
+import { _parsePlan } from '../src/ai/strategist.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
 const silent = { warn() {}, info() {} };
@@ -215,6 +216,32 @@ test('bootWorld: frische Welt + Spieler 0 (Mock-Pool, keine Legacy)', async () =
   assert.equal(h.map.width, world.width); // geteilte Karte referenziert
   assert.ok(calls.some((c) => /INSERT INTO world/.test(c)), 'Welt wurde gespeichert');
   assert.ok(calls.some((c) => /INSERT INTO players/.test(c)), 'Spieler wurde gespeichert');
+});
+
+test('Stratege: LLM-Plan wird robust geparst und validiert', () => {
+  // LLM-Antwort mit <think>, Fließtext und unbekannter Gebäude-ID
+  const raw = `<think>überlege…</think> Hier mein Plan:
+{"strategie":"Werkzeug sichern","bauplan":[{"gebaeude":"lumberjack","anzahl":3},{"gebaeude":"gibt_es_nicht","anzahl":2},{"gebaeude":"sawmill","anzahl":99}],"politik":{"nahrungsPuffer":0.35,"aggression":2},"persoenlichkeit":"fleißig","chronik":"Nordmark rodet Wälder."}`;
+  const plan = _parsePlan(raw, registry);
+  assert.ok(plan, 'Plan sollte parsebar sein');
+  // unbekannte ID entfernt, Anzahl gedeckelt (≤20)
+  assert.deepEqual(plan.buildQueue.map((q) => q.buildingId), ['lumberjack', 'sawmill']);
+  assert.equal(plan.buildQueue[1].count, 20);
+  // aggression auf [0,1] geklemmt
+  assert.equal(plan.policies.aggression, 1);
+  assert.equal(plan.policies.foodBuffer, 0.35);
+  assert.equal(plan.strategy, 'Werkzeug sichern');
+  assert.match(plan.chronicle, /Nordmark/);
+});
+
+test('Executor: befolgt den Bauplan des Strategen', () => {
+  const world = { ...generateWorld(13, { islandCount: 3, islandSize: 40, gap: 14 }), version: 1 };
+  const ai = newPlayerOnIsland(game, registry, world, 1, { id: 1, kind: 'ai', name: 'KI' });
+  ai.plan = { buildQueue: [{ buildingId: 'gatherer_hut', count: 2 }], policies: {}, updatedAt: 'x' };
+  for (let t = 0; t < 200; t++) { runExecutor(registry, ai, game); runTick(registry, ai, game); }
+  // Der Plan-Eintrag sollte abgearbeitet worden sein (count heruntergezählt)
+  assert.ok((ai.buildings.gatherer_hut?.count || 0) >= 2, 'Bauplan-Ziel nicht erreicht');
+  assert.equal(ai.plan.buildQueue[0].count, 0, 'Plan-Fortschritt nicht dekrementiert');
 });
 
 test('Executor: KI-Insel baut selbstständig und bleibt auf ihrer Insel', () => {
