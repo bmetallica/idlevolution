@@ -106,6 +106,55 @@ export function embedLegacyState(legacy, world) {
   };
 }
 
+/**
+ * Lässt eine Insel beim Epochenaufstieg wachsen: erweitert ihre Region um bis zu
+ * `grow` Felder je Seite in den Ozean (nur so weit, dass zu Nachbarinseln/Weltrand
+ * mindestens `minGap` Wasser bleibt) und wandelt Küstenwasser der Region in
+ * Sand→Gras um (mehr Baufläche). Mutiert world (tiles, islands[i], version).
+ * @returns {boolean} true, wenn tatsächlich gewachsen.
+ */
+export function growIslandRegion(world, islandId, grow = 3, minGap = 6) {
+  const isl = (world.islands || []).find((i) => i.id === islandId);
+  if (!isl) return false;
+  const W = world.width, H = world.height;
+  const others = world.islands.filter((i) => i.id !== islandId);
+  const vOverlap = (o) => o.y < isl.y + isl.h && o.y + o.h > isl.y;
+  const hOverlap = (o) => o.x < isl.x + isl.w && o.x + o.w > isl.x;
+  const minOr = (arr, fallback) => (arr.length ? Math.min(...arr) : fallback);
+  // Freiraum je Richtung (bis Nachbar bzw. Weltrand), abzüglich Sicherheits-Puffer
+  const clrR = minOr(others.filter((o) => vOverlap(o) && o.x >= isl.x + isl.w).map((o) => o.x - (isl.x + isl.w)), W - (isl.x + isl.w));
+  const clrL = minOr(others.filter((o) => vOverlap(o) && o.x + o.w <= isl.x).map((o) => isl.x - (o.x + o.w)), isl.x);
+  const clrD = minOr(others.filter((o) => hOverlap(o) && o.y >= isl.y + isl.h).map((o) => o.y - (isl.y + isl.h)), H - (isl.y + isl.h));
+  const clrU = minOr(others.filter((o) => hOverlap(o) && o.y + o.h <= isl.y).map((o) => isl.y - (o.y + o.h)), isl.y);
+  const gR = Math.max(0, Math.min(grow, clrR - minGap));
+  const gL = Math.max(0, Math.min(grow, clrL - minGap));
+  const gD = Math.max(0, Math.min(grow, clrD - minGap));
+  const gU = Math.max(0, Math.min(grow, clrU - minGap));
+
+  isl.x -= gL; isl.y -= gU; isl.w += gL + gR; isl.h += gU + gD;
+
+  // Küsten-Wachstum: mehrere Ringe Wasser→Sand→Gras innerhalb der (neuen) Region
+  let arr = world.tiles.split('');
+  const at = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? 'W' : arr[y * W + x]);
+  const iters = Math.max(1, gL + gR + gU + gD ? grow : 1);
+  for (let it = 0; it < iters; it++) {
+    const next = arr.slice();
+    const atN = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? 'W' : next[y * W + x]);
+    for (let y = isl.y; y < isl.y + isl.h; y++) for (let x = isl.x; x < isl.x + isl.w; x++) {
+      if (arr[y * W + x] !== 'W') continue;
+      if (at(x - 1, y) !== 'W' || at(x + 1, y) !== 'W' || at(x, y - 1) !== 'W' || at(x, y + 1) !== 'W') next[y * W + x] = 'S';
+    }
+    for (let y = isl.y; y < isl.y + isl.h; y++) for (let x = isl.x; x < isl.x + isl.w; x++) {
+      if (arr[y * W + x] !== 'S') continue;
+      if (atN(x - 1, y) !== 'W' && atN(x + 1, y) !== 'W' && atN(x, y - 1) !== 'W' && atN(x, y + 1) !== 'W') next[y * W + x] = 'G';
+    }
+    arr = next;
+  }
+  world.tiles = arr.join('');
+  world.version = (world.version || 0) + 1;
+  return true;
+}
+
 /** Liefert die Insel-ID, deren Region (x,y) enthält, sonst null (offener Ozean). */
 export function islandAt(world, x, y) {
   for (const isl of world.islands || []) {

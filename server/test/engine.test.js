@@ -7,7 +7,7 @@ import { loadRegistry } from '../src/content/loader.js';
 import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity, computeNetRates, computeResourceFlows } from '../src/engine/tick.js';
 import { evaluateConditions } from '../src/engine/rules.js';
 import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '../src/engine/map.js';
-import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyState } from '../src/engine/world.js';
+import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyState, growIslandRegion } from '../src/engine/world.js';
 import { newPlayerOnIsland, bootWorld } from '../src/engine/players.js';
 import { runExecutor } from '../src/ai/executor.js';
 import { createShipment, tickShips, shipPosition, findHarbor } from '../src/engine/ships.js';
@@ -376,6 +376,24 @@ test('Territorium: Bauen nur in der eigenen Insel-Region', () => {
   // Ohne region (heutiges Single-Player-Verhalten) → keine Territoriums-Schranke
   const noRegion = canPlace(map, { instances: [], placed: {}, cleared: new Set() }, registry, def, isl0.spawn.x, isl0.spawn.y);
   assert.ok(noRegion.ok, `ohne region sollte baubar sein: ${noRegion.reason}`);
+});
+
+test('Inselwachstum: gewinnt Land, ohne Nachbarn zu überrennen', () => {
+  const world = { ...generateWorld(21, { islandCount: 4, islandSize: 34, gap: 18 }), version: 1 };
+  const isl = world.islands[1];
+  const before = { x: isl.x, y: isl.y, w: isl.w, h: isl.h };
+  const landIn = (r) => { let n = 0; for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (world.tiles[y * world.width + x] !== 'W') n++; return n; };
+  const landBefore = landIn(before);
+
+  assert.equal(growIslandRegion(world, 1, 3, 6), true);
+  assert.ok(isl.w > before.w || isl.h > before.h, 'Region nicht gewachsen');
+  assert.ok(landIn(isl) > landBefore, 'kein zusätzliches Land gewonnen');
+  assert.equal(world.tiles.length, world.width * world.height, 'Weltdimensionen verändert');
+  assert.ok(world.version > 1);
+  for (const o of world.islands) if (o.id !== 1) {
+    const overlap = isl.x < o.x + o.w && isl.x + isl.w > o.x && isl.y < o.y + o.h && isl.y + isl.h > o.y;
+    assert.equal(overlap, false, `Region überlappt Insel ${o.id}`);
+  }
 });
 
 test('Welt: deterministisch bei gleichem Seed', () => {

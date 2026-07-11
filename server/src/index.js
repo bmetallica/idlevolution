@@ -8,6 +8,7 @@ import { createRegistryHolder } from './content/loader.js';
 import { loadGameConfig, logEvent } from './engine/state.js';
 import { runTick, runTicks } from './engine/tick.js';
 import { bootWorld, savePlayer, saveWorld } from './engine/players.js';
+import { growIslandRegion } from './engine/world.js';
 import { runExecutor } from './ai/executor.js';
 import { tickShips } from './engine/ships.js';
 import { aiConsiderTrade, aiPostOffer } from './engine/trade.js';
@@ -72,7 +73,18 @@ const interval = setInterval(async () => {
       const events = runTick(registryHolder.registry, p, game);
       for (const e of events) {
         logEvent(pool, e.type, { ...e.payload, player: p.id }).catch(() => {});
-        if (e.type === 'epoch_advance') log.info(`Epochen-Aufstieg [${p.name}]: ${e.payload.from} → ${e.payload.to}`);
+        if (e.type === 'epoch_advance') {
+          log.info(`Epochen-Aufstieg [${p.name}]: ${e.payload.from} → ${e.payload.to}`);
+          // Insel wächst inselintern (mehr Baufläche), ohne Nachbarn zu überrennen
+          if (growIslandRegion(world, p.islandId)) {
+            const isl = world.islands.find((i) => i.id === p.islandId);
+            if (isl) p.region = { x: isl.x, y: isl.y, w: isl.w, h: isl.h };
+            for (const pl of players) if (pl.map) { pl.map.tiles = world.tiles; pl.map.width = world.width; pl.map.height = world.height; }
+            await saveWorld(pool, world);
+            await savePlayer(pool, p);
+            log.info(`Insel [${p.name}] gewachsen → Region ${isl?.w}×${isl?.h} (Welt-Version ${world.version})`);
+          }
+        }
       }
     }
     // KI-Handel (Stufe 5): KI prüft ab und zu offene Angebote an und stellt eigene ein
