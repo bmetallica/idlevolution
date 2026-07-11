@@ -655,7 +655,7 @@
     if (ts - rt.lastNpc >= NPC_MS - 1) {
       const mult = Math.min(4, (ts - rt.lastNpc) / SIM_STEP_MS);
       rt.lastNpc = ts;
-      npcSystem.step(instances, defIndex, roadSet, mult);
+      npcSystem.step(instances, defIndex, roadSet, mult, map?.islands);
     }
     // Render-Deckel
     if (ts - rt.lastRender >= RENDER_MS - 1) {
@@ -845,7 +845,7 @@
     if (sig !== _roadsSig) { _roadsSig = sig; buildRoadsCanvas(); }
   }
   // NPC-Anzahl an Bevölkerung/Gebäude koppeln
-  $: npcSystem.sync(population, instances, defIndex);
+  $: npcSystem.sync(population, instances, defIndex, map?.islands);
 </script>
 
 <div
