@@ -24,6 +24,39 @@ export function aiConsiderTrade(world, players, ai, registry, tick) {
   return null;
 }
 
+/**
+ * Einfache KI-Angebotslogik: stellt (höchstens ein) Angebot ein — bietet einen
+ * Nicht-Nahrungs-Überschuss gegen ein knappes, von Gebäuden verbrauchtes Gut,
+ * fair nach baseValue mit kleinem Rabatt. Minimal gehalten.
+ */
+export function aiPostOffer(world, ai, registry, tick) {
+  if (ai.kind !== 'ai' || ai.active === false || !findHarbor(ai)) return null;
+  if ((world.offers || []).some((o) => o.owner === ai.id)) return null; // schon ein Angebot offen
+
+  let give = null, giveStock = 0;
+  for (const [rid, amt] of Object.entries(ai.resources || {})) {
+    if (amt > 120 && amt > giveStock && registry.resources.get(rid)?.category !== 'food') { give = rid; giveStock = amt; }
+  }
+  if (!give) return null;
+
+  const consumed = new Set();
+  for (const b of registry.buildings.values()) for (const r of Object.keys(b.production?.inputs || {})) consumed.add(r);
+  let want = null, wantStock = Infinity;
+  for (const rid of consumed) {
+    if (rid === give || registry.resources.get(rid)?.category === 'food') continue;
+    const amt = ai.resources[rid] || 0;
+    if (amt < 25 && amt < wantStock) { want = rid; wantStock = amt; }
+  }
+  if (!want) return null;
+
+  const gv = registry.resources.get(give)?.baseValue || 1;
+  const wv = registry.resources.get(want)?.baseValue || 1;
+  const giveAmt = Math.max(1, Math.min(60, Math.floor(giveStock * 0.4)));
+  const wantAmt = Math.max(1, Math.round((giveAmt * gv) / wv * 0.9)); // 10% Rabatt → attraktiv
+  try { return createOffer(world, ai, { resourceId: give, amount: giveAmt }, { resourceId: want, amount: wantAmt }, tick); }
+  catch { return null; }
+}
+
 /** Stellt ein Angebot ein und zieht die angebotene Ware treuhänderisch ab. */
 export function createOffer(world, player, give, want, tick) {
   const gAmt = Math.floor(Number(give?.amount) || 0);

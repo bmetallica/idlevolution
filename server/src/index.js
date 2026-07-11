@@ -10,7 +10,7 @@ import { runTick, runTicks } from './engine/tick.js';
 import { bootWorld, savePlayer, saveWorld } from './engine/players.js';
 import { runExecutor } from './ai/executor.js';
 import { tickShips } from './engine/ships.js';
-import { aiConsiderTrade } from './engine/trade.js';
+import { aiConsiderTrade, aiPostOffer } from './engine/trade.js';
 import gameRoutes from './routes/game.js';
 import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
@@ -75,8 +75,11 @@ const interval = setInterval(async () => {
         if (e.type === 'epoch_advance') log.info(`Epochen-Aufstieg [${p.name}]: ${e.payload.from} → ${e.payload.to}`);
       }
     }
-    // KI-Handel (Stufe 5): KI prüft ab und zu offene Angebote (niedrige Frequenz)
-    if (tickCounter % 12 === 0) for (const p of players) if (p.kind === 'ai' && p.active !== false) aiConsiderTrade(world, players, p, registryHolder.registry, human.tick);
+    // KI-Handel (Stufe 5): KI prüft ab und zu offene Angebote an und stellt eigene ein
+    if (tickCounter % 12 === 0) for (const p of players) if (p.kind === 'ai' && p.active !== false) {
+      aiConsiderTrade(world, players, p, registryHolder.registry, human.tick);
+      aiPostOffer(world, p, registryHolder.registry, human.tick);
+    }
     // Schiffe (Stufe 4) über den Ozean vorrücken; angekommene Ladung ausliefern.
     const delivered = tickShips(world, players, human.tick);
     for (const s of delivered) logEvent(pool, 'ship_arrived', { from: s.owner, to: s.toOwner, cargo: s.cargo }).catch(() => {});

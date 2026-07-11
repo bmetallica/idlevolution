@@ -11,7 +11,7 @@ import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyS
 import { newPlayerOnIsland, bootWorld } from '../src/engine/players.js';
 import { runExecutor } from '../src/ai/executor.js';
 import { createShipment, tickShips, shipPosition, findHarbor } from '../src/engine/ships.js';
-import { createOffer, acceptOffer, cancelOffer } from '../src/engine/trade.js';
+import { createOffer, acceptOffer, cancelOffer, aiPostOffer } from '../src/engine/trade.js';
 import { _parsePlan } from '../src/ai/strategist.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
@@ -283,6 +283,22 @@ test('Handel: Angebot mit Treuhand, Annahme liefert beide Waren per Schiff', () 
   assert.equal(b.resources.wood, 40, 'Ware nicht beim Annehmer');
   assert.equal(a.resources.tools, 10, 'Bezahlung nicht beim Anbieter');
   assert.equal(world.ships.length, 0);
+});
+
+test('Handel: KI stellt Angebot aus Überschuss gegen knappes Gut ein', () => {
+  const world = { ships: [], offers: [], nextShipId: 1, nextOfferId: 1 };
+  const ai = {
+    id: 1, kind: 'ai', active: true, islandId: 1,
+    resources: { wood: 300, planks: 3 }, // Holz-Überschuss, Bretter knapp (von sawmill verbraucht? nein — planks von toolmaker verbraucht)
+    instances: [{ id: 1, buildingId: 'harbor', x: 0, y: 0, counted: true }],
+  };
+  const offer = aiPostOffer(world, ai, registry, 0);
+  assert.ok(offer, 'KI hat kein Angebot gestellt');
+  assert.equal(offer.give.resourceId, 'wood');
+  assert.ok(offer.give.amount > 0 && ai.resources.wood === 300 - offer.give.amount, 'Treuhand nicht abgezogen');
+  assert.notEqual(offer.want.resourceId, 'wood');
+  // Kein zweites Angebot, solange eines offen ist
+  assert.equal(aiPostOffer(world, ai, registry, 0), null);
 });
 
 test('Handel: Rücknahme erstattet Treuhand; Fehlerpfade', () => {
