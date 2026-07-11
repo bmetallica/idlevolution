@@ -14,21 +14,17 @@ export function findHarbor(player) {
  * Startet eine Lieferung: zieht die Ladung beim Absender ab und legt ein Schiff
  * an, das zur Zielinsel fährt. Mutiert world + fromPlayer. Wirft bei Fehler.
  */
-export function createShipment(world, players, fromPlayer, toIslandId, resourceId, amount, tick) {
-  amount = Math.floor(Number(amount) || 0);
-  if (amount <= 0) throw new Error('Menge muss größer 0 sein');
+/**
+ * Legt ein Schiff von fromPlayer zu toPlayer an, OHNE Ware abzuziehen (die Ware
+ * gilt als bereits reserviert/Treuhand — z.B. bei Handelsverträgen). Beide
+ * brauchen einen Hafen.
+ */
+export function dispatchShip(world, fromPlayer, toPlayer, resourceId, amount, tick) {
   const fromHarbor = findHarbor(fromPlayer);
-  if (!fromHarbor) throw new Error('Du brauchst einen Hafen');
-  const toPlayer = players.find((p) => p.islandId === Number(toIslandId) && p.active !== false);
-  if (!toPlayer) throw new Error('Zielinsel hat keinen aktiven Bewohner');
-  if (toPlayer.id === fromPlayer.id) throw new Error('Das ist deine eigene Insel');
   const toHarbor = findHarbor(toPlayer);
-  if (!toHarbor) throw new Error('Zielinsel hat keinen Hafen');
-  if ((fromPlayer.resources[resourceId] || 0) < amount) throw new Error(`Nicht genug ${resourceId}`);
-
-  fromPlayer.resources[resourceId] -= amount;
+  if (!fromHarbor || !toHarbor) throw new Error('Beide Inseln brauchen einen Hafen');
   const from = { islandId: fromPlayer.islandId, x: fromHarbor.x, y: fromHarbor.y };
-  const to = { islandId: Number(toIslandId), x: toHarbor.x, y: toHarbor.y };
+  const to = { islandId: toPlayer.islandId, x: toHarbor.x, y: toHarbor.y };
   const dist = Math.hypot(to.x - from.x, to.y - from.y);
   const travel = Math.max(20, Math.ceil(dist / SHIP_SPEED));
   world.ships ??= [];
@@ -36,11 +32,24 @@ export function createShipment(world, players, fromPlayer, toIslandId, resourceI
   const ship = {
     id: world.nextShipId++,
     owner: fromPlayer.id, toOwner: toPlayer.id,
-    from, to, cargo: { resourceId, amount },
+    from, to, cargo: { resourceId, amount: Math.floor(amount) },
     departTick: tick, arriveTick: tick + travel,
   };
   world.ships.push(ship);
   return ship;
+}
+
+export function createShipment(world, players, fromPlayer, toIslandId, resourceId, amount, tick) {
+  amount = Math.floor(Number(amount) || 0);
+  if (amount <= 0) throw new Error('Menge muss größer 0 sein');
+  if (!findHarbor(fromPlayer)) throw new Error('Du brauchst einen Hafen');
+  const toPlayer = players.find((p) => p.islandId === Number(toIslandId) && p.active !== false);
+  if (!toPlayer) throw new Error('Zielinsel hat keinen aktiven Bewohner');
+  if (toPlayer.id === fromPlayer.id) throw new Error('Das ist deine eigene Insel');
+  if (!findHarbor(toPlayer)) throw new Error('Zielinsel hat keinen Hafen');
+  if ((fromPlayer.resources[resourceId] || 0) < amount) throw new Error(`Nicht genug ${resourceId}`);
+  fromPlayer.resources[resourceId] -= amount;
+  return dispatchShip(world, fromPlayer, toPlayer, resourceId, amount, tick);
 }
 
 /** Interpolierte Weltposition eines Schiffs (für das Rendering). */

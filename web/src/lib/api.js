@@ -65,6 +65,12 @@ export const disableAi = (playerId) =>
     body: JSON.stringify({ playerId }),
   }).then(json);
 
+export const fetchMarket = () => fetch('/api/market').then(json);
+const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }).then(json);
+export const createOffer = (giveRes, giveAmt, wantRes, wantAmt) => post('/api/market/offer', { giveRes, giveAmt, wantRes, wantAmt });
+export const acceptOffer = (offerId) => post('/api/market/accept', { offerId });
+export const cancelOffer = (offerId) => post('/api/market/cancel', { offerId });
+
 export const fetchAiLog = () => fetch('/api/ai-log').then(json);
 
 export const disablePack = (packId) =>

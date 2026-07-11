@@ -11,6 +11,7 @@ import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyS
 import { newPlayerOnIsland, bootWorld } from '../src/engine/players.js';
 import { runExecutor } from '../src/ai/executor.js';
 import { createShipment, tickShips, shipPosition, findHarbor } from '../src/engine/ships.js';
+import { createOffer, acceptOffer, cancelOffer } from '../src/engine/trade.js';
 import { _parsePlan } from '../src/ai/strategist.js';
 
 const dataDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
@@ -255,6 +256,49 @@ test('Schiffe: Fehler bei fehlendem Hafen / eigener Insel / zu wenig Ware', () =
   assert.throws(() => createShipment(world, [a, b], a, 0, 'wood', 3, 0), /eigene Insel/);
   b.instances = [{ id: 2, buildingId: 'harbor', x: 50, y: 0, counted: true }];
   assert.throws(() => createShipment(world, [a, b], a, 1, 'wood', 99, 0), /Nicht genug/);
+});
+
+test('Handel: Angebot mit Treuhand, Annahme liefert beide Waren per Schiff', () => {
+  const world = { ships: [], offers: [], nextShipId: 1, nextOfferId: 1 };
+  const harborA = [{ id: 1, buildingId: 'harbor', x: 10, y: 10, counted: true }];
+  const harborB = [{ id: 2, buildingId: 'harbor', x: 90, y: 30, counted: true }];
+  const a = { id: 0, islandId: 0, active: true, resources: { wood: 100, tools: 0 }, instances: harborA };
+  const b = { id: 1, islandId: 1, active: true, resources: { wood: 0, tools: 50 }, instances: harborB };
+  const players = [a, b];
+
+  // A bietet 40 Holz gegen 10 Werkzeug → 40 Holz sofort in Treuhand
+  const offer = createOffer(world, a, { resourceId: 'wood', amount: 40 }, { resourceId: 'tools', amount: 10 }, 0);
+  assert.equal(a.resources.wood, 60);
+  assert.equal(world.offers.length, 1);
+
+  // B nimmt an → zahlt 10 Werkzeug (Treuhand), zwei Schiffe unterwegs
+  acceptOffer(world, players, b, offer.id, 0);
+  assert.equal(b.resources.tools, 40); // 10 abgezogen
+  assert.equal(world.offers.length, 0);
+  assert.equal(world.ships.length, 2);
+
+  // Nach Ankunft: B hat 40 Holz, A hat 10 Werkzeug
+  const maxArrive = Math.max(...world.ships.map((s) => s.arriveTick));
+  tickShips(world, players, maxArrive);
+  assert.equal(b.resources.wood, 40, 'Ware nicht beim Annehmer');
+  assert.equal(a.resources.tools, 10, 'Bezahlung nicht beim Anbieter');
+  assert.equal(world.ships.length, 0);
+});
+
+test('Handel: Rücknahme erstattet Treuhand; Fehlerpfade', () => {
+  const world = { ships: [], offers: [], nextShipId: 1, nextOfferId: 1 };
+  const a = { id: 0, islandId: 0, active: true, resources: { wood: 50 }, instances: [{ id: 1, buildingId: 'harbor', x: 0, y: 0, counted: true }] };
+  const b = { id: 1, islandId: 1, active: true, resources: { tools: 2 }, instances: [{ id: 2, buildingId: 'harbor', x: 40, y: 0, counted: true }] };
+  const o = createOffer(world, a, { resourceId: 'wood', amount: 30 }, { resourceId: 'tools', amount: 10 }, 0);
+  assert.equal(a.resources.wood, 20);
+  // B kann nicht zahlen (nur 2 Werkzeug)
+  assert.throws(() => acceptOffer(world, [a, b], b, o.id, 0), /Nicht genug/);
+  // eigenes Angebot annehmen verboten
+  assert.throws(() => acceptOffer(world, [a, b], a, o.id, 0), /eigenes/);
+  // Rücknahme erstattet
+  cancelOffer(world, a, o.id);
+  assert.equal(a.resources.wood, 50);
+  assert.equal(world.offers.length, 0);
 });
 
 test('Stratege: LLM-Plan wird robust geparst und validiert', () => {

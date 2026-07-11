@@ -121,6 +121,12 @@ function chooseBuild(registry, player, game) {
       if (!hasProducer(rid) || (rates[rid] || 0) < RAW_TARGET) { const p = producerOf(rid); if (p) return p; }
     }
     const epoch = currentEpoch(registry, player);
+    // HAFEN) sobald etabliert EINEN Hafen bauen → ermöglicht Handel/Transport (Stufe 4/5).
+    //        Auch im Bau befindliche zählen (sonst werden mehrere gleichzeitig gebaut).
+    if (player.population > 30 && !(player.instances || []).some((i) => i.buildingId === 'harbor')) {
+      const h = cands.find((c) => c.id === 'harbor' && staffable(c));
+      if (h) return h;
+    }
     // PLAN) LLM-Bauplan des Strategen abarbeiten (Stufe 2), auf dem Sicherheitsnetz
     //       (Nahrung/Baumaterial) aufsetzend: nächstes offenes Ziel bauen; ist es
     //       noch nicht baubar, dessen fehlende Kosten-Vorkette sichern.

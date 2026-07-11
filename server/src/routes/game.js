@@ -15,6 +15,7 @@ import { logEvent } from '../engine/state.js';
 import { savePlayer, newPlayerOnIsland, saveWorld } from '../engine/players.js';
 import { planTurn } from '../ai/strategist.js';
 import { createShipment, shipPosition, findHarbor } from '../engine/ships.js';
+import { createOffer, acceptOffer, cancelOffer } from '../engine/trade.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
 import { askAdvisor } from '../ai/advisor.js';
@@ -281,6 +282,37 @@ export default async function gameRoutes(fastify) {
       await saveWorld(ctx.pool, ctx.world);
       logEvent(ctx.pool, 'ship_sent', { to: ship.toOwner, cargo: ship.cargo }).catch(() => {});
       return { ok: true, ship: { id: ship.id, arriveTick: ship.arriveTick } };
+    } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
+  });
+
+  // ── Handelsmarkt (Stufe 5) ──
+  fastify.get('/api/market', async () => ({
+    hasHarbor: !!findHarbor(ctx.human),
+    offers: (ctx.world?.offers || []).map((o) => ({
+      ...o, ownerName: ctx.players.find((p) => p.id === o.owner)?.name || '?', mine: o.owner === ctx.human?.id,
+    })),
+  }));
+  fastify.post('/api/market/offer', async (req, reply) => {
+    const { giveRes, giveAmt, wantRes, wantAmt } = req.body || {};
+    try {
+      const o = createOffer(ctx.world, ctx.human, { resourceId: giveRes, amount: giveAmt }, { resourceId: wantRes, amount: wantAmt }, ctx.human?.tick ?? 0);
+      await savePlayer(ctx.pool, ctx.human); await saveWorld(ctx.pool, ctx.world);
+      return { ok: true, offerId: o.id };
+    } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
+  });
+  fastify.post('/api/market/accept', async (req, reply) => {
+    try {
+      const r = acceptOffer(ctx.world, ctx.players, ctx.human, req.body?.offerId, ctx.human?.tick ?? 0);
+      await savePlayer(ctx.pool, ctx.human); await saveWorld(ctx.pool, ctx.world);
+      logEvent(ctx.pool, 'trade_accept', { offer: r.offer.id, offerer: r.offerer, by: ctx.human.id }).catch(() => {});
+      return { ok: true };
+    } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
+  });
+  fastify.post('/api/market/cancel', async (req, reply) => {
+    try {
+      cancelOffer(ctx.world, ctx.human, req.body?.offerId);
+      await savePlayer(ctx.pool, ctx.human); await saveWorld(ctx.pool, ctx.world);
+      return { ok: true };
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
   });
 

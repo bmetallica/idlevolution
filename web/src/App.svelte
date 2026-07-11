@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip } from './lib/api.js';
+  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, fetchMarket, createOffer, acceptOffer, cancelOffer } from './lib/api.js';
   import { buildChainIndex, computeShortages } from './lib/chains.js';
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
@@ -36,6 +36,29 @@
   async function removeAi(id) {
     aiBusy = true;
     try { await disableAi(id); await loadPlayers(); } catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  // Handelsmarkt (Stufe 5)
+  let showMarket = false;
+  let market = null;
+  let offGive = '', offGiveAmt = 50, offWant = '', offWantAmt = 50;
+  async function loadMarket() { try { market = await fetchMarket(); } catch {} }
+  async function submitOffer() {
+    if (!offGive || !offWant || offGive === offWant || aiBusy) return;
+    aiBusy = true;
+    try { await createOffer(offGive, offGiveAmt, offWant, offWantAmt); showFlash('Angebot eingestellt'); await loadMarket(); await pollState(); }
+    catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  async function takeOffer(id) {
+    aiBusy = true;
+    try { await acceptOffer(id); showFlash('📦 Angenommen — Schiffe unterwegs'); await loadMarket(); await pollState(); }
+    catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  async function dropOffer(id) {
+    aiBusy = true;
+    try { await cancelOffer(id); await loadMarket(); await pollState(); } catch (e) { showFlash(e.message, false); }
     aiBusy = false;
   }
   // Ware verschiffen
@@ -168,9 +191,10 @@
     loadMap();
     pollState();
     loadPlayers();
+    loadMarket();
     const s = setInterval(pollState, 2000);
     const c = setInterval(loadContent, 60000);
-    const pl = setInterval(loadPlayers, 3000);
+    const pl = setInterval(() => { loadPlayers(); loadMarket(); }, 3000);
     window.addEventListener('keydown', onKey);
     return () => {
       clearInterval(s);
@@ -267,6 +291,13 @@
         🌍
       </button>
       <button
+        class="border rounded px-3 py-1.5 text-sm {showMarket ? 'bg-amber-800 border-amber-500 text-amber-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
+        on:click={() => (showMarket = !showMarket)}
+        title="Handelsmarkt"
+      >
+        🪙
+      </button>
+      <button
         class="border rounded px-3 py-1.5 text-sm {showAssist ? 'bg-indigo-800 border-indigo-500 text-indigo-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
         on:click={() => (showAssist = !showAssist)}
         title="KI-Berater — Fragen zum Spielstand stellen"
@@ -340,6 +371,68 @@
             pollState();
           }}
         />
+      </div>
+    {/if}
+
+    <!-- Handelsmarkt-Panel (Stufe 5) -->
+    {#if showMarket}
+      <div class="absolute top-28 right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-amber-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 max-h-[70vh] overflow-y-auto">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-sm font-semibold text-amber-200">🪙 Handelsmarkt</span>
+          <button class="ml-auto text-stone-500 hover:text-stone-200" on:click={() => (showMarket = false)}>✕</button>
+        </div>
+        {#if market}
+          {#if !market.hasHarbor}
+            <p class="text-[11px] text-stone-500 mb-2">Baue einen ⚓ <b>Hafen</b>, um zu handeln.</p>
+          {/if}
+          {#if market.offers.length}
+            <div class="space-y-1.5">
+              {#each market.offers as o}
+                {@const g = resourceIndex[o.give.resourceId]}
+                {@const w = resourceIndex[o.want.resourceId]}
+                <div class="rounded border border-stone-700 bg-stone-800/60 px-2 py-1.5 text-sm">
+                  <div class="flex items-center gap-1 flex-wrap">
+                    <span class="text-emerald-300">{g?.icon || ''} {o.give.amount} {g?.name?.de || o.give.resourceId}</span>
+                    <span class="text-stone-500">→</span>
+                    <span class="text-amber-300">{w?.icon || ''} {o.want.amount} {w?.name?.de || o.want.resourceId}</span>
+                  </div>
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="text-[11px] text-stone-500">von {o.ownerName}</span>
+                    {#if o.mine}
+                      <button class="ml-auto text-[11px] text-stone-400 hover:text-red-300" on:click={() => dropOffer(o.id)} disabled={aiBusy}>zurücknehmen</button>
+                    {:else}
+                      <button class="ml-auto text-[11px] rounded bg-amber-700 hover:bg-amber-600 disabled:opacity-40 px-2 py-0.5 text-white" on:click={() => takeOffer(o.id)} disabled={aiBusy || !market.hasHarbor}>annehmen</button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="text-[11px] text-stone-500">Noch keine Angebote am Markt.</p>
+          {/if}
+          {#if market.hasHarbor}
+            <div class="mt-2.5 pt-2 border-t border-stone-800">
+              <div class="text-[11px] text-stone-400 mb-1">Angebot einstellen (gebe → nehme)</div>
+              <div class="flex items-center gap-1">
+                <input type="number" min="1" bind:value={offGiveAmt} class="w-12 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
+                <select bind:value={offGive} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
+                  <option value="">gebe…</option>
+                  {#each (state?.resources || []).filter((r) => r.amount >= 1) as r}<option value={r.id}>{resourceIndex[r.id]?.icon || ''} {resourceIndex[r.id]?.name?.de || r.id}</option>{/each}
+                </select>
+              </div>
+              <div class="flex items-center gap-1 mt-1">
+                <input type="number" min="1" bind:value={offWantAmt} class="w-12 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
+                <select bind:value={offWant} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
+                  <option value="">nehme…</option>
+                  {#each (content?.resources || []) as r}<option value={r.id}>{r.icon || ''} {r.name?.de || r.id}</option>{/each}
+                </select>
+                <button class="rounded bg-amber-700 hover:bg-amber-600 disabled:opacity-40 px-2 text-white text-sm" on:click={submitOffer} disabled={aiBusy || !offGive || !offWant}>+</button>
+              </div>
+            </div>
+          {/if}
+        {:else}
+          <p class="text-xs text-stone-500">Lade…</p>
+        {/if}
       </div>
     {/if}
 
