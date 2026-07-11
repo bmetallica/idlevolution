@@ -392,10 +392,11 @@
     {#if $isMobile}
       <!-- Mobile: Fadenkreuz + Bau-Bestätigung -->
       {#if buildDef}
-        <div class="absolute inset-0 z-20 pointer-events-none grid place-items-center">
-          <div class="text-4xl text-white/70 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">✛</div>
+        <!-- Fadenkreuz bei 40 % Höhe (deckungsgleich mit dem Bau-Geist in IsoMap) -->
+        <div class="absolute inset-x-0 z-20 pointer-events-none flex justify-center" style="top: 40%; transform: translateY(-50%);">
+          <div class="text-4xl text-white/80 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">✛</div>
         </div>
-        <div class="absolute bottom-36 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3">
+        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3">
           <button class="mobile-fab" on:click={() => (buildRot = (buildRot + 1) % 4)} title="Drehen">↻</button>
           <button class="mobile-fab active" style="width:56px;height:56px;font-size:1.5rem" on:click={() => mapComp?.placeAtCenter()} title="Bauen">✓</button>
           <button class="mobile-fab" on:click={() => (buildDef = null)} title="Abbrechen">✕</button>

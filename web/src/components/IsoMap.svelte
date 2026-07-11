@@ -57,6 +57,8 @@
   let lastPointer = { x: 0, y: 0 };
   const pointers = new Map(); // pointerId -> {x,y}: aktive Zeiger (Multi-Touch)
   let pinch = null; // {dist, cx, cy}: Zwei-Finger-Geste (Pinch-Zoom + Schwenk)
+  const RETICLE_FY = 0.4; // Fadenkreuz im oberen Mittelbereich (nicht Mitte) — Bau-Buttons unten verdecken es sonst
+  const reticleXY = () => ({ x: viewW / 2, y: viewH * RETICLE_FY });
   let terrainBakes = []; // [{canvas, ox, oy}] je Insel — Ozean bleibt prozedural
   const npcSystem = createNpcSystem();
 
@@ -325,8 +327,8 @@
     for (const b of decoBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
     if (paintSet.size) drawPaintPreview();
 
-    // Mobile: der Bau-Geist klebt am Fadenkreuz in der Bildmitte
-    if (reticle && buildDef) hover = pointerToGrid(viewW / 2, viewH / 2);
+    // Mobile: der Bau-Geist klebt am Fadenkreuz (oberer Mittelbereich)
+    if (reticle && buildDef) { const p = reticleXY(); hover = pointerToGrid(p.x, p.y); }
 
     // Hover-/Bau-Vorschau
     if (hover) {
@@ -855,7 +857,8 @@
   // Mobile: platziert das gewählte Gebäude auf dem Feld in der Bildschirmmitte (Fadenkreuz)
   export function placeAtCenter() {
     if (!buildDef) return;
-    const g = pointerToGrid(viewW / 2, viewH / 2);
+    const p = reticleXY();
+    const g = pointerToGrid(p.x, p.y);
     if (g.gx < 0 || g.gy < 0 || g.gx >= map.width || g.gy >= map.height) return;
     const check = canPlaceClient(map, instances, defIndex, buildDef, g.gx, g.gy, buildRot);
     dispatch('place', { buildingId: buildDef.id, x: g.gx, y: g.gy, rot: buildRot, ok: check.ok, reason: check.reason });
