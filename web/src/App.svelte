@@ -300,14 +300,20 @@
     pollState();
     loadPlayers();
     loadMarket();
-    const s = setInterval(pollState, 2000);
-    const c = setInterval(loadContent, 60000);
-    const pl = setInterval(() => { loadPlayers(); loadMarket(); }, 3000);
+    // Polling pausiert im Hintergrund-Tab (Akku/PWA) — beim Zurückkehren sofort auffrischen.
+    const visible = () => !document.hidden;
+    const s = setInterval(() => { if (visible()) pollState(); }, 2000);
+    const c = setInterval(() => { if (visible()) loadContent(); }, 60000);
+    // Markt nur pollen, wenn das Panel offen ist (players braucht die Karte für Schiffe immer)
+    const pl = setInterval(() => { if (visible()) { loadPlayers(); if (showMarket) loadMarket(); } }, 3000);
+    const onVis = () => { if (visible()) { pollState(); loadPlayers(); if (showMarket) loadMarket(); } };
+    document.addEventListener('visibilitychange', onVis);
     window.addEventListener('keydown', onKey);
     return () => {
       clearInterval(s);
       clearInterval(c);
       clearInterval(pl);
+      document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('keydown', onKey);
     };
   });

@@ -246,5 +246,35 @@ produziert`, `JSON-Parse-Fehler an Position 2768`. Daraus folgt:
 - [ ] EpochBanner-Ersatz auf Mobile; Polling bündeln *(separat, nach Bedarf)*
 
 **Später/optional:** Zwei-Phasen-Generierung, LLM-Warteschlange mit Priorität,
-Offline-Aufholung in Blöcken, Onboarding, PNG-Icons, Cross-Account-Test
-(blockiert durch zweiten Account), `aggression` aktivieren (User-Entscheid).
+Onboarding, PNG-Icons, Cross-Account-Test (blockiert durch zweiten Account),
+`aggression` aktivieren (User-Entscheid).
+
+---
+
+## Zweiter Durchgang (2026-07-13) — weitere Funde, alle gefixt
+
+- [x] 🔴 **Shutdown speicherte die Welt nicht** — Schiffe/Angebote/Kriegs-
+  erklärungen der letzten ≤ 60 s gingen bei jedem Stop verloren (`index.js`:
+  shutdown sicherte nur Spieler). → `saveWorld` ergänzt.
+- [x] 🔴 **Treuhand-Verlust-Fenster in 6 Routen** — Markt/Schiff/Krieg buchen
+  erst beim Spieler ab und legen die Ware dann in der Welt ab; die Saves waren
+  getrennt → Crash dazwischen frisst die Treuhand. → `persistHumanWorld()`
+  (eine Transaktion) in allen 6 Routen.
+- [x] 🟡 **Instanz-ID-Kollision Mensch ↔ KI** — beide zählen ab 1; das Ketten-
+  Overlay (`instances.find(id)`) erwischte beim Klick auf ein KI-Gebäude das
+  gleichnamige eigene. → KI-Instanz-IDs namespaced (`p<id>-<n>`).
+- [x] 🟡 **Polling lief im Hintergrund-Tab weiter** (state 2 s + players/market
+  3 s — Akku/PWA) und der Markt wurde auch bei geschlossenem Panel gepollt.
+  → `visibilitychange`-Pause + sofortiges Auffrischen beim Zurückkehren;
+  Markt nur bei offenem Panel.
+- [x] 🟡 **Offline-Aufholung ohne KI-Züge** — KI-Inseln produzierten beim
+  Nachholen, bauten aber nie (Executor lief nicht) → nach langem Stillstand
+  fallen sie unfair zurück. → Aufholung in 60-Tick-Blöcken mit Executor-Zug.
+- [x] 🟡 **Inselwachstum verfiel bei Offline-Epochenaufstieg** — `epoch_advance`-
+  Events der Aufholung wurden nur gezählt, nie verarbeitet. → Boot-Loop zieht
+  `growIslandRegion` nach.
+
+Geprüft und in Ordnung: `/api/build` ohne Sofort-Save (Design: Tick-Loop
+persistiert ≤ 1 min, nur Spieler-Daten betroffen), acceptOffer-Guards vor
+Abbuchung, Publish-Reentranz beim Sync (wirft kontrolliert), Schiffs-Uhr nach
+Offline-Sprung (Lieferung im ersten Live-Tick).

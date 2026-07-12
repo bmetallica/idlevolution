@@ -276,7 +276,9 @@ export default async function gameRoutes(fastify) {
         strategy: p.plan?.strategy || null,
         personality: p.plan?.personality || null,
         chronicle: p.plan?.chronicle || null,
-        instances: (p.instances || []).map((i) => ({ id: i.id, buildingId: i.buildingId, x: i.x, y: i.y, rot: i.rot ?? 0, done: !!i.counted, owner: p.id })),
+        // IDs fremder Spieler namespacen — Mensch & KI zählen beide ab 1, sonst
+        // kollidieren sie clientseitig (z.B. Ketten-Overlay findet per find(id) das falsche Gebäude)
+        instances: (p.instances || []).map((i) => ({ id: p.id === ctx.human.id ? i.id : `p${p.id}-${i.id}`, buildingId: i.buildingId, x: i.x, y: i.y, rot: i.rot ?? 0, done: !!i.counted, owner: p.id })),
       })),
       tickSeconds: ctx.config.tickSeconds,
       // Rohdaten → der Client interpoliert die Position flüssig zwischen den Ticks
@@ -287,14 +289,31 @@ export default async function gameRoutes(fastify) {
     };
   });
 
+  // Spieler + Welt ATOMAR speichern (Treuhand-Sicherheit): Markt/Schiff/Krieg
+  // ziehen erst Ware ab und legen sie dann in der Welt ab — ein Crash zwischen
+  // zwei getrennten Saves würde die Treuhand-Ware verlieren.
+  async function persistHumanWorld() {
+    const client = await ctx.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await savePlayer(client, ctx.human);
+      await saveWorld(client, ctx.world);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   // Ware zu einer anderen Insel verschiffen (Stufe 4) — vom menschlichen Spieler
   fastify.post('/api/ship', async (req, reply) => {
     const { toIsland, resourceId, amount } = req.body || {};
     try {
       if (ctx.registryHolder.registry.resources.get(resourceId)?.category === 'special') throw new Error('Militärgüter reisen nur per Kriegserklärung');
       const ship = createShipment(ctx.world, ctx.players, ctx.human, Number(toIsland), resourceId, Number(amount), ctx.human?.tick ?? 0);
-      await savePlayer(ctx.pool, ctx.human);
-      await saveWorld(ctx.pool, ctx.world);
+      await persistHumanWorld();
       logEvent(ctx.pool, 'ship_sent', { to: ship.toOwner, cargo: ship.cargo }).catch(() => {});
       return { ok: true, ship: { id: ship.id, arriveTick: ship.arriveTick } };
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
@@ -310,8 +329,7 @@ export default async function gameRoutes(fastify) {
       if (!target) throw new Error('Zielinsel hat keinen aktiven Bewohner');
       if (target.kind === 'human') throw new Error('Du kannst dich nicht selbst angreifen');
       const decl = declareWar(ctx.world, ctx.human, target, soldiers);
-      await savePlayer(ctx.pool, ctx.human);
-      await saveWorld(ctx.pool, ctx.world);
+      await persistHumanWorld();
       logEvent(ctx.pool, 'war_declared', { target: target.id, soldiers: decl.soldiers }).catch(() => {});
       return { ok: true, soldiers: decl.soldiers };
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
@@ -321,8 +339,7 @@ export default async function gameRoutes(fastify) {
   fastify.post('/api/attack/cancel', async (req, reply) => {
     try {
       const decl = cancelDeclaration(ctx.world, ctx.human, req.body?.targetPlayer);
-      await savePlayer(ctx.pool, ctx.human);
-      await saveWorld(ctx.pool, ctx.world);
+      await persistHumanWorld();
       return { ok: true, soldiers: decl.soldiers };
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
   });
@@ -356,14 +373,14 @@ export default async function gameRoutes(fastify) {
     try {
       if (isSpecial(giveRes) || isSpecial(wantRes)) throw new Error('Militärgüter sind nicht handelbar');
       const o = createOffer(ctx.world, ctx.human, { resourceId: giveRes, amount: giveAmt }, { resourceId: wantRes, amount: wantAmt }, ctx.human?.tick ?? 0);
-      await savePlayer(ctx.pool, ctx.human); await saveWorld(ctx.pool, ctx.world);
+      await persistHumanWorld();
       return { ok: true, offerId: o.id };
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
   });
   fastify.post('/api/market/accept', async (req, reply) => {
     try {
       const r = acceptOffer(ctx.world, ctx.players, ctx.human, req.body?.offerId, ctx.human?.tick ?? 0);
-      await savePlayer(ctx.pool, ctx.human); await saveWorld(ctx.pool, ctx.world);
+      await persistHumanWorld();
       logEvent(ctx.pool, 'trade_accept', { offer: r.offer.id, offerer: r.offerer, by: ctx.human.id }).catch(() => {});
       return { ok: true };
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
@@ -371,7 +388,7 @@ export default async function gameRoutes(fastify) {
   fastify.post('/api/market/cancel', async (req, reply) => {
     try {
       cancelOffer(ctx.world, ctx.human, req.body?.offerId);
-      await savePlayer(ctx.pool, ctx.human); await saveWorld(ctx.pool, ctx.world);
+      await persistHumanWorld();
       return { ok: true };
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
   });

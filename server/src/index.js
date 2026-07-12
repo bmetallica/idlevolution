@@ -39,13 +39,34 @@ const { world, players, migrated } = await bootWorld(pool, game, registryHolder.
 if (migrated) log.info(`Migration: Alt-Stand als Insel 0 in Mehr-Insel-Welt eingebettet (${world.width}×${world.height}, ${world.islands.length} Inseln)`);
 const human = players.find((p) => p.kind === 'human') || players[0];
 
-// Offline-Progression je aktivem Spieler: verpasste Ticks seit letztem Speichern nachholen
+// Offline-Progression je aktivem Spieler: verpasste Ticks seit letztem Speichern
+// nachholen. KI-Spieler in Blöcken mit Executor-Zügen — sonst produzieren ihre
+// Inseln zwar nach, bauen aber nie (und fallen nach langem Stillstand zurück).
 const capTicks = Math.floor((config.offlineCapHours * 3600) / config.tickSeconds);
 for (const p of players) {
   if (p.active === false) continue;
   const missed = Math.min(capTicks, Math.floor((Date.now() - (p.lastTickAt || Date.now())) / 1000 / config.tickSeconds));
   if (missed > 0) {
-    const events = runTicks(registryHolder.registry, p, game, missed);
+    let events = [];
+    if (p.kind === 'ai') {
+      const CHUNK = 60; // 1 Executor-Zug je ~5 Minuten Spielzeit
+      for (let left = missed; left > 0; left -= CHUNK) {
+        runExecutor(registryHolder.registry, p, game);
+        events = events.concat(runTicks(registryHolder.registry, p, game, Math.min(CHUNK, left)));
+      }
+    } else {
+      events = runTicks(registryHolder.registry, p, game, missed);
+    }
+    // Epochen-Aufstiege der Aufholung nachziehen (Inselwachstum würde sonst verfallen)
+    for (const e of events) {
+      if (e.type === 'epoch_advance' && growIslandRegion(world, p.islandId)) {
+        const isl = world.islands.find((i) => i.id === p.islandId);
+        if (isl) p.region = { x: isl.x, y: isl.y, w: isl.w, h: isl.h };
+        for (const pl of players) if (pl.map) { pl.map.tiles = world.tiles; pl.map.width = world.width; pl.map.height = world.height; }
+        await saveWorld(pool, world);
+        log.info(`Insel [${p.name}] während Offline-Aufholung gewachsen (Epoche ${e.payload?.to})`);
+      }
+    }
     p.lastTickAt = Date.now();
     await savePlayer(pool, p);
     log.info(`Offline-Progression [${p.name}]: ${missed} Ticks nachgeholt (${events.length} Ereignisse)`);
@@ -153,6 +174,7 @@ const shutdown = async (signal) => {
   clearInterval(interval);
   try {
     for (const p of players) { p.lastTickAt = Date.now(); await savePlayer(pool, p); }
+    await saveWorld(pool, world); // Schiffe/Angebote/Kriegserklärungen der letzten Minute
   } catch (err) {
     log.error(`Speichern beim Shutdown fehlgeschlagen: ${err.message}`);
   }
