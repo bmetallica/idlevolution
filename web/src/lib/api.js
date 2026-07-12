@@ -79,6 +79,10 @@ export const onlineConnect = () => post('/api/online/connect');
 export const onlineDisconnect = () => post('/api/online/disconnect');
 export const onlineAcceptDisclaimer = () => post('/api/online/disclaimer');
 export const onlinePublish = () => post('/api/online/publish');
+export const onlineSync = () => post('/api/online/sync');
+export const onlineNeighbors = () => fetch('/api/online/neighbors').then(json);
+export const onlineIsland = (owner) => fetch(`/api/online/island/${encodeURIComponent(owner)}`).then(json);
+export const onlineAdopt = (owner) => post('/api/online/adopt', { owner });
 
 export const disablePack = (packId) =>
   fetch('/api/pack/disable', {

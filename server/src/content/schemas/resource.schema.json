@@ -4,7 +4,7 @@
   "required": ["id", "name", "category", "epoch", "baseValue"],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,40}$" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,80}$" },
     "name": {
       "type": "object",
       "required": ["de"],

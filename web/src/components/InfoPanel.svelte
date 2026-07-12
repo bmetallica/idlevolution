@@ -8,6 +8,7 @@
   export let resourceIndex = {};
   export let instances = [];
   export let shortages = new Set();
+  export let bottlenecks = new Set(); // Durchlauf-Engpässe (läuft, aber ohne Puffer)
   export let state = null;
   export let mobile = false;
 
@@ -39,6 +40,7 @@
   $: inputRids = def?.production ? Object.keys(def.production.inputs || {}) : [];
   $: outputRids = def?.production ? Object.keys(def.production.outputs || {}) : [];
   $: missingInputs = inputRids.filter((r) => shortages.has(r));
+  $: tightInputs = inputRids.filter((r) => bottlenecks.has(r) && !shortages.has(r));
   $: unsuppliedInputs = inputRids.filter((r) => !neigh.suppliers.some((s) => s.rid === r));
   $: suppliersByB = summarize(neigh.suppliers);
   $: customersByB = summarize(neigh.customers);
@@ -111,6 +113,10 @@
           {#if missingInputs.length}
             <div class="rounded bg-red-950/70 border border-red-800 px-2 py-1 text-red-200">
               ⚠️ Rohstoff-Mangel: {missingInputs.map((r) => resName(r)).join(', ')} — Produktion steht.
+            </div>
+          {:else if tightInputs.length}
+            <div class="rounded bg-sky-950/60 border border-sky-800/70 px-2 py-1 text-sky-200">
+              🔁 {tightInputs.map((r) => resName(r)).join(', ')} wird direkt ab Produktion verbraucht — läuft, aber ohne Lager-Puffer. Mehr Produzenten erhöhen den Durchsatz.
             </div>
           {:else if unsuppliedInputs.length}
             <div class="rounded bg-amber-950/60 border border-amber-800/70 px-2 py-1 text-amber-200">

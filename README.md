@@ -1,6 +1,6 @@
 # 🏛️ Idlevolution
 
-**Ein vollgrafisches Aufbauspiel im Anno-Stil, das sich jede Nacht von einer lokalen KI selbst weiterentwickelt.**
+**Ein vollgrafisches Aufbauspiel im Anno-Stil, das sich jede Nacht von einer lokalen KI selbst weiterentwickelt — mit KI-Mitspielern auf der eigenen Weltkarte und asynchronem Online-Multiplayer über GitHub.**
 
 Die Spiel-Engine enthält **keine einzige hartcodierte Spielmechanik-Instanz** — jedes Gebäude, jede Ressource, jede Produktionskette und jedes Zeitalter kommt aus JSON-Content-Packs in `data/content/`. Nachts analysiert eine lokale KI (Gemma via llama.cpp) den aktuellen Spielstand und erweitert das Spiel eigenständig um neue Inhalte. Der Mensch behält dabei volle Transparenz und Kontrolle.
 
@@ -11,6 +11,9 @@ Die Spiel-Engine enthält **keine einzige hartcodierte Spielmechanik-Instanz** �
 ## Inhaltsverzeichnis
 
 - [Was das Spiel ist](#-was-das-spiel-ist)
+- [KI-Mitspieler](#-ki-mitspieler)
+- [Online-Multiplayer über GitHub](#-online-multiplayer-über-github)
+- [Mobile & PWA](#-mobile--pwa)
 - [Der weitere Zweck der lokalen KI](#-der-weitere-zweck-der-lokalen-ki)
 - [Schnellstart](#-schnellstart)
 - [Architektur](#-architektur)
@@ -29,16 +32,54 @@ Die Spiel-Engine enthält **keine einzige hartcodierte Spielmechanik-Instanz** �
 
 Idlevolution ist ein isometrisches Idle-/Aufbauspiel im Browser:
 
-- **Echte Insel-Karte** (48×48) mit prozeduralem Terrain: Wasser, Sandküsten, Gras, Wald und Fels — mit Klippen, Küstenschaum und gemischtem Baumbestand.
+- **Mehr-Insel-Weltkarte** mit prozeduralem Terrain: Wasser, Sandküsten, Gras, Wald und Fels — mit Klippen, Küstenschaum und gemischtem Baumbestand. Die eigene Insel wächst beim Epochenaufstieg in den Ozean hinein.
 - **Baumodus** mit Anno-artigen Platzierungsregeln: Minen brauchen Fels, Fischer brauchen Wasser, Holzfäller brauchen Wald in der Nähe. Grün/Rot-Vorschau, mehrfelder Grundrisse, **Gebäude drehen** (`R`).
 - **Prozedural gezeichnete Gebäude** — jeder Typ hat eine eigene Silhouette (Haus, Sägewerk, Mine, Schmelze, Farm, Markt, Turm, Lager …), abgeleitet aus seiner Funktion.
 - **NPC-Siedler**, die zwischen Wohnhaus und Arbeitsstätte pendeln und auf Straßen laufen.
 - **Straßen & Logistik**: Wege bauen (Linksziehen) und abreißen (Rechtsziehen); Straßenanschluss steigert die Produktion.
 - **Wirtschaft**: Produktionsketten (Holz → Bretter → Werkzeuge), Arbeiterzuweisung, Lagerkapazitäten, sichtbare Ketten- und Engpass-Anzeigen.
 - **Bevölkerungsstufen & Bedürfnisse**: Jede Epoche hat eine Bevölkerungsstufe (Jäger & Sammler → Siedler → …) mit Güter-Bedürfnissen, die die Zufriedenheit und damit das Wachstum steuern.
+- **Schifffahrt & Handel**: ⚓ Häfen bauen, Waren per Schiff zu Nachbarinseln schicken, Angebote am 🪙 Marktplatz einstellen und annehmen (mit Treuhand und Schiffs-Lieferung).
 - **Zeitalter-Fortschritt**, Tag/Nacht-Zyklus, Minimap, Offline-Progression.
 
 Und das Wichtigste: **Der Inhalt wächst weiter, ohne dass jemand ihn programmiert.**
+
+---
+
+## 🤝 KI-Mitspieler
+
+Bis zu **4 zuschaltbare KI-Spieler** besiedeln eigene Inseln auf derselben Weltkarte (🌍-Panel) und entwickeln sich **in Echtzeit** mit — über dieselbe Tick-Engine wie der Mensch:
+
+- **Stratege + Taktiker**: Die lokale LLM plant einmal täglich Strategie, Bauplan und Persönlichkeit jedes KI-Spielers; ein deterministischer Executor setzt den Plan Tick für Tick um (Arbeiter zuweisen, Ketten bauen, Epochen aufsteigen).
+- **Nachbarn immer sichtbar**: Kamera-Schwenk oder Klick im 🌍-Panel springt zur Insel; Rangliste nach Bevölkerung, Strategie und Chronik je Insel. Fremde Gebäude sind read-only.
+- **Handel**: KI-Spieler bauen Häfen, nehmen faire Angebote an und stellen eigene ein — der Markt belebt sich von selbst.
+
+Roadmap & Details: [`docs/roadmap-ki-spieler.md`](docs/roadmap-ki-spieler.md) (Stufe 6 „Krieg" bewusst offen).
+
+---
+
+## 🌐 Online-Multiplayer über GitHub
+
+Asynchroner Multiplayer **ohne eigenen Server** — GitHub ist Speicher, Login und Prüf-Instanz. Community-Repo: [idlevolution-online](https://github.com/bmetallica/idlevolution-online).
+
+- **Opt-in mit Disclaimer**: Ohne „Mit GitHub verbinden" (Device Flow, kein Passwort im Spiel) und explizite Freigabe-Zustimmung („auf eigene Gefahr, keine Haftung") verlässt kein Byte den eigenen Rechner.
+- **Insel veröffentlichen**: Die eigene Insel (Karte, Gebäude, Straßen) und die **eigenen LLM-generierten Inhalte** werden als Pull Request hochgeladen — IDs global genamespaced (`gh-<user>--…`), Sprite-Farben eingefroren. Eine GitHub Action prüft jeden PR (Pfad-Schutz, Schema, Limits) und merged automatisch. Läuft nach der ersten Freigabe nächtlich mit.
+- **Nachbarn besuchen**: Fremde Inseln werden tokenlos synchronisiert, streng validiert, isoliert abgelegt und lassen sich read-only besuchen — inklusive der fremden, prozedural gezeichneten LLM-Gebäude in Originaloptik.
+- **✨ Inhalte übernehmen**: Die LLM-Baupläne eines Nachbarn lassen sich per Klick ins eigene Spiel importieren — sie werden ein normales, in der 🤖-Zentrale deaktivierbares Content-Pack. So wandern KI-Erfindungen von Welt zu Welt.
+
+Konzept: [`docs/roadmap-multiplayer.md`](docs/roadmap-multiplayer.md) · Fortschritt: [`docs/multiplayer_roadmap.md`](docs/multiplayer_roadmap.md) (Handel und Betrieb folgen).
+
+---
+
+## 📱 Mobile & PWA
+
+Idlevolution ist am Smartphone spielbar (**Querformat**), ohne dass sich die Desktop-Optik ändert:
+
+- **Touch-Steuerung**: Ein Finger schwenkt, zwei Finger zoomen (Pinch); Bauen per zentriertem Fadenkreuz mit ✓-Bestätigung, 🧹-Radiermodus statt Rechtsklick.
+- **Mobile-HUD**: Bau-Dock unten, Menü-FABs, Panels als Bottom-Sheets, antippbare Ressourcen-Aufschlüsselung.
+- **Installierbar als PWA**: Homescreen-Icon, Fullscreen im Querformat (Android-Install-Prompt braucht HTTPS).
+
+Zum Testen am Desktop: `?mobile=1` an die URL hängen.
 
 ---
 
@@ -204,6 +245,13 @@ So kann die KI für neue Zeitalter neue Materialien, Gegenstände, Gebäude und 
 | `POST /api/rotate` `{instanceId}` | Gebäude um 90° drehen |
 | `POST /api/workers` `{buildingId, delta}` | Arbeiter zuweisen |
 | `POST /api/road` `{tiles, on}` | Straßen bauen/abreißen |
+| `GET /api/players` · `POST /api/players/enable|disable` | KI-Mitspieler ansehen / zu- & abschalten |
+| `POST /api/ship` `{toIsland, resourceId, amount}` | Ware per Schiff zu einer Nachbarinsel |
+| `GET /api/market` · `POST /api/market/offer|accept|cancel` | Handels-Angebote (Treuhand + Schiffs-Lieferung) |
+| `POST /api/online/connect` · `GET /api/online/status` | GitHub-Login (Device Flow) für den Online-Modus |
+| `POST /api/online/publish` | Eigene Insel + LLM-Packs als PR ins Community-Repo |
+| `POST /api/online/sync` · `GET /api/online/neighbors` | Online-Inseln laden / auflisten (tokenlos) |
+| `GET /api/online/island/:owner` · `POST /api/online/adopt` | Nachbar-Insel besuchen / dessen Inhalte übernehmen |
 | `GET /api/ai-log` | KI-Lauf-Protokoll (öffentlich, für die KI-Zentrale) |
 | `POST /api/pack/disable` `{packId}` | Generiertes Pack deaktivieren + aufräumen |
 | `GET /api/ai/export` 🔒 | Siedlungs-Status für die KI (Bearer `AI_IMPORT_TOKEN`) |
@@ -230,6 +278,8 @@ Alles über `.env` (siehe `.env.example`):
 | `LLM_CTX` / `LLM_MAX_TOKENS` / `LLM_TEMPERATURE` | LLM-Parameter |
 | `AI_CRON` | Zeitplan der nächtlichen Generierung (Cron-Syntax) |
 | `AI_RUN_ON_START` | Sofortlauf beim Start (Debug) |
+| `ONLINE_CLIENT_ID` | GitHub-OAuth-App-Client-ID für den Online-Modus (öffentlich, Standard gesetzt) |
+| `ONLINE_REPO` | Community-Repo des Online-Modus (Standard `bmetallica/idlevolution-online`) |
 
 ---
 
@@ -251,7 +301,7 @@ Das Backup rotiert (`BACKUP_KEEP`, Standard 14). Empfohlen als Host-Cron **vor**
 ## 🧪 Entwicklung
 
 ```bash
-cd server && npm install && npm test     # 30 Unit-Tests (Validator, Balancer, Engine, Bedürfnisse, Straßen)
+cd server && npm install && npm test     # 52 Unit-Tests (Validator, Balancer, Engine, Bedürfnisse, Welt/Inseln, Schiffe, Handel)
 cd web && npm install && npm run dev      # Vite-Dev-Server mit API-Proxy auf :8420
 ```
 
@@ -271,16 +321,19 @@ data/
   rejected/                  # abgelehnte KI-Pakete (mit Begründung)
   backups/                   # Backups (backup.sh)
 server/
-  src/engine/                # Tick-Simulation, Karte, Regeln, Zustand
+  src/engine/                # Tick-Simulation, Welt/Inseln, Schiffe, Handel, Regeln, Zustand
   src/content/               # Loader, Validator, Balancer, Schemas
-  src/ai/                    # Export, Generator (Prompt), Importer, Scheduler
-  src/routes/                # game / content / ai
+  src/ai/                    # Export, Generator (Prompt), Importer, Scheduler, KI-Spieler (Stratege/Executor)
+  src/online/                # Online-Modus: Auth (Device Flow), Exporter, Sync, Validierung, Übernahme
+  src/routes/                # game / content / ai / online
   src/db/migrations/         # SQL-Migrationen
   test/                      # Node-Test-Runner
 web/
-  src/components/            # IsoMap, BuildPalette, EpochBanner, InfoPanel, Chronicle (KI-Zentrale) …
-  src/lib/                   # sprites, iso, npc, chains, placement, api
+  src/components/            # IsoMap, BuildPalette, EpochBanner, InfoPanel, OnlineSection, Chronicle …
+  src/lib/                   # sprites, iso, npc, chains, placement, device (Mobile), api
+  public/                    # PWA: manifest, Service-Worker, Icon
 scripts/                     # generate-now / backup / restore
+docs/                        # Screenshots + Roadmaps (KI-Spieler, Multiplayer)
 ```
 
 ---

@@ -71,6 +71,14 @@ export async function runNightly(log = console) {
     log.info?.(`[nightly] Online-Veröffentlichung übersprungen: ${err.message}`);
   }
 
+  // Online-Modus (M2): fremde Inseln nachziehen (tokenlos, auch ohne Login sinnvoll)
+  try {
+    const sync = await api('POST', '/api/online/sync', {});
+    if (sync?.ok) log.info?.(`[nightly] Online-Sync: ${sync.islands.filter((i) => i.ok).length} Nachbar-Insel(n)`);
+  } catch (err) {
+    log.info?.(`[nightly] Online-Sync übersprungen: ${err.message}`);
+  }
+
   if (result.status === 'rejected') {
     log.warn?.(`[nightly] Pack abgelehnt: ${JSON.stringify(result.rejected).slice(0, 500)}`);
   } else {

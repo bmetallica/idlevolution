@@ -21,18 +21,20 @@
 </script>
 
 <div class="{compact ? 'px-2 py-1 rounded-b-lg border-x' : 'px-4 py-2'} bg-stone-950/90 backdrop-blur border-b border-stone-800">
-  <div class="flex items-center gap-y-1 {compact ? 'flex-nowrap overflow-x-auto gap-x-3 text-xs' : 'flex-wrap gap-x-5 text-sm'}">
-    <span class="flex items-center gap-1 {state.popTrend === 'shrinking' ? 'text-red-400' : ''}" title={state.popReason || 'Bevölkerung / Wohnraum'}>
+  <!-- Immer EINE Zeile: bei Platzmangel horizontal scrollen statt umbrechen
+       (mehrzeilig würde die Werkzeugleiste darunter verdecken) -->
+  <div class="flex items-center flex-nowrap overflow-x-auto {compact ? 'gap-x-3 text-xs' : 'gap-x-5 text-sm'}">
+    <span class="flex items-center gap-1 shrink-0 {state.popTrend === 'shrinking' ? 'text-red-400' : ''}" title={state.popReason || 'Bevölkerung / Wohnraum'}>
       <span>👥</span>
       <span class="font-mono">{Math.floor(state.population)}/{state.housing}</span>
       {#if state.popTrend === 'shrinking'}<span>📉</span>{:else if state.popTrend === 'growing'}<span class="text-emerald-500">📈</span>{/if}
     </span>
-    <span class="flex items-center gap-1" title="Freie Arbeiter">
+    <span class="flex items-center gap-1 shrink-0" title="Freie Arbeiter">
       <span>💪</span>
       <span class="font-mono">{state.workers.idle}</span>
       <span class="text-stone-500">frei</span>
     </span>
-    <span class="w-px h-4 bg-stone-700"></span>
+    <span class="w-px h-4 bg-stone-700 shrink-0"></span>
     {#each state.resources as r (r.id)}
       {@const def = resourceIndex[r.id]}
       <span
@@ -49,7 +51,7 @@
         </span>
       </span>
     {/each}
-    <span class="ml-auto text-xs text-stone-600 font-mono" title="Tick">⏱ {state.tick}</span>
+    <span class="ml-auto shrink-0 text-xs text-stone-600 font-mono pl-3" title="Tick">⏱ {state.tick}</span>
   </div>
 </div>
 

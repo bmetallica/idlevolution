@@ -4,6 +4,8 @@
 import { startDeviceFlow, pollToken, fetchGithubUser, loadOnline, saveOnline } from '../online/auth.js';
 import { buildIslandExport, buildPacksExport } from '../online/exporter.js';
 import { publishFiles } from '../online/github.js';
+import { syncOnline, listNeighbors, loadNeighbor } from '../online/sync.js';
+import { adoptPack } from '../online/adopt.js';
 
 export const DISCLAIMER_VERSION = 1;
 
@@ -121,6 +123,48 @@ export default async function onlineRoutes(fastify) {
     };
     await saveOnline(ctx.pool, ctx.online.settings);
     return { ok: true };
+  });
+
+  // Nachbarn synchronisieren (M2) — tokenlos, geht auch OHNE GitHub-Verbindung
+  let syncing = false;
+  fastify.post('/api/online/sync', async (req, reply) => {
+    if (syncing) { reply.code(409); return { ok: false, error: 'Sync läuft bereits' }; }
+    syncing = true;
+    try {
+      const r = await syncOnline(ctx, fastify.log);
+      ctx.online.settings = { ...ctx.online.settings, lastSyncAt: r.syncedAt };
+      await saveOnline(ctx.pool, ctx.online.settings);
+      return { ok: true, ...r };
+    } catch (err) {
+      reply.code(502);
+      return { ok: false, error: err.message };
+    } finally {
+      syncing = false;
+    }
+  });
+
+  // Liste der synchronisierten Online-Nachbarn (lokale Kopien)
+  fastify.get('/api/online/neighbors', async () => ({
+    neighbors: await listNeighbors(ctx),
+    lastSyncAt: ctx.online.settings.lastSyncAt || null,
+  }));
+
+  // Insel + Packs eines Nachbarn für die Besuchen-Ansicht
+  fastify.get('/api/online/island/:owner', async (req, reply) => {
+    try { return { ok: true, ...(await loadNeighbor(ctx, req.params.owner)) }; }
+    catch (err) { reply.code(404); return { ok: false, error: err.message }; }
+  });
+
+  // Inhalte eines Nachbarn übernehmen (M4) — wird ein normales, deaktivierbares Pack
+  fastify.post('/api/online/adopt', async (req, reply) => {
+    try {
+      const r = await adoptPack(ctx, req.body?.owner);
+      fastify.log.info(`Online-Modus: Inhalte von ${req.body?.owner} übernommen (${r.buildings} Gebäude, ${r.resources} Ressourcen)`);
+      return { ok: true, ...r };
+    } catch (err) {
+      reply.code(400);
+      return { ok: false, error: err.message };
+    }
   });
 
   // Verbindung trennen (Token löschen; Disclaimer-Zustimmung bleibt dokumentiert)

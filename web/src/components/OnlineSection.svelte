@@ -1,14 +1,18 @@
 <script>
   // Online-Modus (M0): GitHub-Verbindung per Device Flow + Disclaimer.
   // Sitzt unten im 🌍-Nachbarn-Panel. Der Token bleibt immer auf dem Server.
-  import { onMount, onDestroy } from 'svelte';
-  import { onlineStatus, onlineConnect, onlineDisconnect, onlineAcceptDisclaimer, onlinePublish } from '../lib/api.js';
+  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+  import { onlineStatus, onlineConnect, onlineDisconnect, onlineAcceptDisclaimer, onlinePublish, onlineSync, onlineNeighbors } from '../lib/api.js';
 
+  const dispatch = createEventDispatcher();
   let st = null; // /api/online/status
   let busy = false;
   let showDisclaimer = false;
   let timer = 0;
   let publishMsg = null; // { ok, text }
+  let neighbors = null; // synchronisierte Online-Inseln
+  let lastSyncAt = null;
+  let syncing = false;
 
   async function refresh() {
     try { st = await onlineStatus(); } catch {}
@@ -43,7 +47,16 @@
     busy = false;
   }
 
-  onMount(refresh);
+  async function loadNeighbors() {
+    try { const r = await onlineNeighbors(); neighbors = r.neighbors; lastSyncAt = r.lastSyncAt; } catch {}
+  }
+  async function doSync() {
+    if (syncing) return; syncing = true;
+    try { await onlineSync(); await loadNeighbors(); } catch {}
+    syncing = false;
+  }
+
+  onMount(() => { refresh(); loadNeighbors(); });
   onDestroy(() => clearTimeout(timer));
 </script>
 
@@ -89,6 +102,32 @@
       🐙 Mit GitHub verbinden
     </button>
     <p class="mt-1 text-[11px] text-stone-600">Optional: Insel veröffentlichen, Nachbarn besuchen, handeln.</p>
+  {/if}
+
+  <!-- Online-Nachbarn (Lesen ist tokenlos — funktioniert auch ohne Login) -->
+  <div class="mt-2 flex items-center gap-2">
+    <span class="text-[11px] text-stone-400">Online-Inseln</span>
+    <button class="ml-auto text-[11px] text-sky-400 hover:text-sky-300 disabled:opacity-50" on:click={doSync} disabled={syncing} title="Vom Community-Repo aktualisieren">
+      {syncing ? '⏳ lädt…' : '🔄 aktualisieren'}
+    </button>
+  </div>
+  {#if neighbors === null}
+    <p class="text-[11px] text-stone-600">Lade…</p>
+  {:else if !neighbors.length}
+    <p class="text-[11px] text-stone-600">Noch keine fremden Inseln synchronisiert{lastSyncAt ? '' : ' — einmal 🔄 aktualisieren'}.</p>
+  {:else}
+    <div class="mt-1 space-y-1">
+      {#each neighbors as n (n.owner)}
+        <div class="flex items-center gap-2 rounded border border-stone-700 bg-stone-800/60 px-2 py-1.5 text-sm">
+          <span>🌐</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-stone-200 truncate">{n.name}</div>
+            <div class="text-[11px] text-stone-500">👥 {Math.floor(n.population)} · {n.epoch?.replace(/^gh-[^-]+(?:-[^-]+)*--/, '') || '—'}</div>
+          </div>
+          <button class="text-[11px] rounded bg-sky-700 hover:bg-sky-600 px-2 py-1 text-white" on:click={() => dispatch('visit', { owner: n.owner })}>Besuchen</button>
+        </div>
+      {/each}
+    </div>
   {/if}
 </div>
 

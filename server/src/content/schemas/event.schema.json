@@ -4,7 +4,7 @@
   "required": ["id", "name", "durationTicks", "modifiers"],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,40}$" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,80}$" },
     "name": {
       "type": "object",
       "required": ["de"],
@@ -23,7 +23,7 @@
       "properties": {
         "production": {
           "type": "object",
-          "propertyNames": { "pattern": "^([a-z][a-z0-9_]{1,40}|\\*)$" },
+          "propertyNames": { "pattern": "^([a-z][a-z0-9_-]{1,80}|\\*)$" },
           "additionalProperties": { "type": "number", "minimum": 0, "maximum": 10 }
         },
         "grant": {

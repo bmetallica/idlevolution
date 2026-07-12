@@ -79,20 +79,27 @@ Konzept, Architektur-Begründungen und Sicherheitsmodell: siehe
 - ⬜ Cross-Account-Test des Fork-Pfads (braucht zweiten GitHub-Account —
   Owner-Pfad ist verifiziert, Fork-Pfad ist implementiert aber ungetestet)
 
-## M2 — Nachbarn entdecken & besuchen — OFFEN
+## M2 — Nachbarn entdecken & besuchen — ERLEDIGT
 
-- ⬜ `server/src/online/sync.js`: index.json + gewählte Inseln/Packs tokenlos
-  laden (raw.githubusercontent), ajv-Validierung gegen dasselbe Schema
-  (Verteidigung in der Tiefe), isolierte Ablage `data/online/<user>/`
-- ⬜ Sync-Trigger: täglich (ai-worker) + manueller „Aktualisieren"-Knopf
-- ⬜ 🌐-Bereich: Liste der Online-Inseln (Name, Epoche, Bevölkerung, zuletzt
-  aktiv), eigener Eintrag markiert
-- ⬜ „Besuchen": read-only-Render in IsoMap (Karte+Instanzen des Nachbarn,
-  eigener defIndex aus dessen packs.json, `_owner` gesetzt → InfoPanel ist
-  bereits schreibgeschützt), Zurück-Knopf
-- ⬜ Sicherheits-Härtung: packs.json-Schema auch Action-seitig strikt prüfen
-  (bisher nur JSON+Größe), Längen-/Regex-Grenzen beim Import
-- ⬜ Stale-Handling: Inseln mit defekten/fehlenden Dateien überspringen
+- ✅ `server/src/online/sync.js`: index.json + Inseln/Packs tokenlos laden
+  (raw.githubusercontent, Größen-Limits), isolierte Ablage `data/online/<user>/`
+  (wird NIE in die eigene Registry gemischt), verwaiste Kopien werden entfernt
+- ✅ `server/src/online/validate.js`: strikte Re-Validierung + Whitelist-
+  Sanitisierung aller Downloads (unbekannte Felder verworfen, Texte gekappt,
+  Farben/Seeds regex-geprüft) — Verteidigung in der Tiefe, der Action wird
+  nicht blind vertraut
+- ✅ Sync-Trigger: nächtlich (run-nightly nach dem Publish) + 🔄-Knopf im
+  🌍-Panel; funktioniert tokenlos auch OHNE GitHub-Login
+- ✅ Online-Inseln-Liste im 🌍-Panel (Name, Epoche, Bevölkerung)
+- ✅ „Besuchen": read-only-Render in IsoMap (fremde Karte+Instanzen, defIndex
+  aus deren packs.json mit eingefrorenen Farben, `_owner` → InfoPanel
+  schreibgeschützt), Kopf-Banner mit ⬅ Zurück; eigenes HUD ausgeblendet
+- ✅ Stale-Handling: defekte Inseln werden übersprungen (Warnung im Log)
+- ✅ Willkommensinsel (`islands/idlevolution-demo/`) als erster Nachbar für
+  jeden neuen Online-Spieler (inkl. Beispiel-Pack)
+- ✅ E2E verifiziert (Playwright): Sync → Panel → Besuchen → Render → Banner
+- ⬜ packs.json-Schema auch Action-seitig strikt prüfen (bisher nur JSON+Größe
+  — client-seitig ist die strikte Prüfung aktiv)
 
 ## M3 — Handel — OFFEN
 
@@ -104,13 +111,21 @@ Konzept, Architektur-Begründungen und Sicherheitsmodell: siehe
 - ⬜ LLM-Preisberater: bewertet fremde Ressourcen (nur Zahlen/Kategorien,
   `<untrusted_data>`-Kapselung, Chroniken nie im Prompt)
 
-## M4 — Content-Austausch — OFFEN
+## M4 — Content-Austausch — ERLEDIGT
 
-- ⬜ „Inhalte übernehmen": fremdes Pack explizit in die eigene Registry
-  importieren (bleibt genamespaced, erneute Validierung, Balance-Grenzen
-  wie beim nächtlichen KI-Import)
-- ⬜ Deaktivierbar wie KI-Packs heute (Instanzen werden sauber entfernt)
-- ⬜ UI in der Besuchen-Ansicht / 🤖-Zentrale
+- ✅ „✨ Übernehmen" in der Besuchen-Ansicht: `online/adopt.js` macht aus der
+  gesäuberten lokalen Kopie ein normales Content-Pack unter
+  `data/content/generated/online-<owner>.json` → lädt wie ein KI-Pack und ist
+  in der 🤖-Zentrale **deaktivierbar** (Instanzen werden sauber entfernt)
+- ✅ Fremde Epochen werden NICHT übernommen — Gebäude/Ressourcen werden auf die
+  eigene Epoche mit gleicher/nächstkleinerer Ordnung gemappt
+- ✅ Erneute Validierung: Whitelist-Sanitisierung (validate.js) + das normale
+  Pack-Schema des Spiels beim Laden (ajv)
+- ✅ Spiel-Schemas gelockert: IDs dürfen `-` enthalten und bis 80 Zeichen lang
+  sein (nötig für genamespacete `gh-<user>--`-IDs; für die eigene KI harmlos)
+- ✅ E2E verifiziert (Playwright): Besuchen → ✨ Übernehmen → Muschelsammler
+  der Willkommensinsel in der eigenen Registry, eingefrorene Farben intakt;
+  52 Server-Tests grün
 
 ## M5 — Betrieb & Politur — OFFEN
 
@@ -124,4 +139,6 @@ Konzept, Architektur-Begründungen und Sicherheitsmodell: siehe
 
 ---
 
-*Stand: 2026-07-12. Dieses Dokument wird mit jedem Meilenstein fortgeschrieben.*
+*Stand: 2026-07-12 (M0, M1, M2, M4 erledigt — offen: M3 Handel, M5 Betrieb,
+Cross-Account-Test, Action-seitige packs.json-Schemaprüfung). Dieses Dokument
+wird mit jedem Meilenstein fortgeschrieben.*

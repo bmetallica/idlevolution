@@ -6,12 +6,12 @@
   "$defs": {
     "resourceMap": {
       "type": "object",
-      "propertyNames": { "pattern": "^([a-z][a-z0-9_]{1,40}|\\*)$" },
+      "propertyNames": { "pattern": "^([a-z][a-z0-9_-]{1,80}|\\*)$" },
       "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1000000 }
     }
   },
   "properties": {
-    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,40}$" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,80}$" },
     "name": {
       "type": "object",
       "required": ["de"],

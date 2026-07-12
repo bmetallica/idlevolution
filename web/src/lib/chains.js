@@ -12,7 +12,15 @@ export function buildChainIndex(buildings = []) {
   return { producers, consumers };
 }
 
-/** Ressourcen, die verbraucht werden, aber (fast) leer sind und nicht nachwachsen. */
+/** Summe der positiven Zuflüsse (Produktion) aus der Fluss-Aufschlüsselung. */
+const inflowOf = (r) => (r.flow || []).filter((f) => f.amount > 0).reduce((s, f) => s + f.amount, 0);
+
+/**
+ * ECHTER Mangel: verbraucht, (fast) leer UND es fließt nichts nach → die
+ * Produktion der Verbraucher steht wirklich. Ressourcen, die "von der Hand in
+ * den Mund" leben (leer, aber Zufluss > 0 wird sofort wieder verbraucht),
+ * sind KEIN Mangel — siehe computeBottlenecks.
+ */
 export function computeShortages(state, chain) {
   const short = new Set();
   if (!state) return short;
@@ -21,9 +29,26 @@ export function computeShortages(state, chain) {
     if (!consumed) continue;
     const cap = r.capacity ?? Infinity;
     const nearlyEmpty = r.amount < Math.max(1, (Number.isFinite(cap) ? cap : 0) * 0.03);
-    if (nearlyEmpty && r.ratePerTick <= 0) short.add(r.id);
+    if (nearlyEmpty && r.ratePerTick <= 0 && inflowOf(r) < 0.001) short.add(r.id);
   }
   return short;
+}
+
+/**
+ * Durchlauf-Engpass: (fast) leer, aber es wird produziert — der Nachschub wird
+ * sofort ab Werk verbraucht. Läuft, aber ohne Puffer; Ausbau erhöht den Durchsatz.
+ */
+export function computeBottlenecks(state, chain) {
+  const tight = new Set();
+  if (!state) return tight;
+  for (const r of state.resources) {
+    const consumed = (chain.consumers[r.id] || []).length > 0;
+    if (!consumed) continue;
+    const cap = r.capacity ?? Infinity;
+    const nearlyEmpty = r.amount < Math.max(1, (Number.isFinite(cap) ? cap : 0) * 0.03);
+    if (nearlyEmpty && r.ratePerTick <= 0.001 && inflowOf(r) >= 0.001) tight.add(r.id);
+  }
+  return tight;
 }
 
 /** Gilt ein platziertes Gebäude als "ausgehungert" (ein Input fehlt)? */

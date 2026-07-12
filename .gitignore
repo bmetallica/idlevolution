@@ -15,6 +15,7 @@ data/content/disabled/
 data/exports/
 data/rejected/
 data/backups/
+data/online/
 
 # OS / Editor / Logs
 .DS_Store

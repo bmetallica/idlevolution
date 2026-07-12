@@ -1,7 +1,7 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, fetchMarket, createOffer, acceptOffer, cancelOffer } from './lib/api.js';
-  import { buildChainIndex, computeShortages } from './lib/chains.js';
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt } from './lib/api.js';
+  import { buildChainIndex, computeShortages, computeBottlenecks } from './lib/chains.js';
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
   import EpochBanner from './components/EpochBanner.svelte';
@@ -15,6 +15,51 @@
   let mobileMenu = false; // ausgeklapptes Menü-FAB (nur Mobile)
   let eraseMode = false; // Radier-Umschalter für Straßen/Deko (statt Rechtsklick, nur Mobile)
   let showBuild = false; // Bau-Dock ein-/ausklappen (nur Mobile)
+
+  // Online-Nachbarn besuchen (M2): fremde Insel read-only in der IsoMap ansehen.
+  // Eigene Simulation läuft serverseitig ungestört weiter.
+  let visiting = null; // { owner, island, map, instances, defIndex, epochIndex, roads }
+  async function visitOnline(owner) {
+    try {
+      const r = await onlineIsland(owner);
+      if (!r.ok) throw new Error(r.error || 'Insel nicht gefunden');
+      const defIdx = { ...defIndex };
+      for (const b of r.packs?.buildings || []) defIdx[b.id] = b;
+      const epIdx = { ...epochIndex };
+      for (const e of r.packs?.epochs || []) epIdx[e.id] = e.order;
+      visiting = {
+        owner,
+        island: r.island,
+        map: { ...r.island.map, legend: map.legend, version: `online-${owner}-${r.island.exportedAt}` },
+        instances: r.island.instances.map((i, idx) => ({ id: `online-${idx}`, ...i, done: true, _owner: owner })),
+        defIndex: defIdx,
+        epochIndex: epIdx,
+        roads: r.island.roads || [],
+        adoptable: (r.packs?.buildings?.length || 0) + (r.packs?.resources?.length || 0),
+      };
+      buildDef = null; roadMode = false; decoType = null; selection = null;
+      showPlayers = showMarket = showChronicle = showAssist = false;
+      await tick();
+      mapComp?.recenter();
+    } catch (e) { showFlash(e.message, false); }
+  }
+  async function leaveVisit() {
+    visiting = null; selection = null;
+    await tick();
+    mapComp?.recenter();
+  }
+  // M4: LLM-generierte Inhalte des besuchten Nachbarn ins eigene Spiel übernehmen
+  async function adoptVisiting() {
+    if (!visiting || aiBusy) return; aiBusy = true;
+    try {
+      const r = await onlineAdopt(visiting.owner);
+      if (!r.ok) throw new Error(r.error);
+      showFlash(`✨ ${r.buildings} Gebäude & ${r.resources} Ressourcen von ${visiting.owner} übernommen (Pack „${r.packId}" — in der 🤖-Zentrale deaktivierbar)`);
+      await loadContent();
+      await pollState();
+    } catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
 
   let content = null;
   let state = null;
@@ -217,6 +262,7 @@
   $: epochIndex = Object.fromEntries((content?.epochs || []).map((e) => [e.id, e.order]));
   $: chainIndex = buildChainIndex(content?.buildings || []);
   $: shortages = state ? computeShortages(state, chainIndex) : new Set();
+  $: bottlenecks = state ? computeBottlenecks(state, chainIndex) : new Set();
   $: newPackIds = new Set(
     (content?.packs || [])
       .filter((p) => p.source === 'ai' && p.createdAt && Date.now() - new Date(p.createdAt).getTime() < 36 * 3600 * 1000)
@@ -230,31 +276,51 @@
   {#if map && content && state}
     <IsoMap
       bind:this={mapComp}
-      {map}
-      instances={allInstances}
-      {defIndex}
-      {epochIndex}
-      {buildDef}
+      map={visiting ? visiting.map : map}
+      instances={visiting ? visiting.instances : allInstances}
+      defIndex={visiting ? visiting.defIndex : defIndex}
+      epochIndex={visiting ? visiting.epochIndex : epochIndex}
+      buildDef={visiting ? null : buildDef}
       {buildRot}
-      {shortages}
-      {roadMode}
-      {decoType}
+      shortages={visiting ? new Set() : shortages}
+      roadMode={visiting ? false : roadMode}
+      decoType={visiting ? null : decoType}
       reticle={$isMobile}
       erase={eraseMode}
-      ships={players?.ships || []}
+      ships={visiting ? [] : players?.ships || []}
       shipTick={players?.tick ?? 0}
       tickSeconds={players?.tickSeconds ?? state.tickSeconds ?? 5}
-      roads={state.roads}
-      placed={state.placed}
-      cleared={state.cleared}
+      roads={visiting ? visiting.roads : state.roads}
+      placed={visiting ? {} : state.placed}
+      cleared={visiting ? [] : state.cleared}
       selectedInstance={selection?.instance}
-      population={state.population}
+      population={visiting ? visiting.island.population : state.population}
       on:place={onPlace}
       on:select={onSelect}
       on:road={onRoad}
       on:deco={onDeco}
     />
 
+    <!-- Besuchen-Modus: fremde Insel read-only, eigenes HUD ausgeblendet -->
+    {#if visiting}
+      <div class="absolute top-0 inset-x-0 z-40 safe-top">
+        <div class="mx-auto max-w-xl m-2 flex items-center gap-2 rounded-lg border border-sky-700 bg-stone-900/95 backdrop-blur px-3 py-2 shadow-xl">
+          <span>🌐</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm text-stone-100 truncate">{visiting.island.name}</div>
+            <div class="text-[11px] text-stone-500">von {visiting.owner} · 👥 {Math.floor(visiting.island.population)} · Stand {visiting.island.exportedAt ? new Date(visiting.island.exportedAt).toLocaleDateString('de-DE') : '—'}</div>
+          </div>
+          {#if visiting.adoptable}
+            <button class="rounded bg-violet-700 hover:bg-violet-600 disabled:opacity-50 px-3 py-1.5 text-sm text-white" on:click={adoptVisiting} disabled={aiBusy} title="LLM-generierte Gebäude & Ressourcen dieses Nachbarn ins eigene Spiel übernehmen">
+              ✨ Übernehmen
+            </button>
+          {/if}
+          <button class="rounded bg-sky-700 hover:bg-sky-600 px-3 py-1.5 text-sm text-white" on:click={leaveVisit}>⬅ Zurück</button>
+        </div>
+      </div>
+    {/if}
+
+    {#if !visiting}
     <!-- Obere HUD-Leiste (über der Werkzeugleiste, damit die Ressourcen-Tooltips
          nicht von den Buttons überlagert werden) -->
     <!-- Mobile: Leiste zwischen 🏗️ (links) und ☰ (rechts) einpassen statt darunter -->
@@ -420,15 +486,18 @@
       </div>
     {/if}
 
-    <!-- Info-Panel (Auswahl) -->
+    {/if}
+
+    <!-- Info-Panel (Auswahl) — auch beim Besuchen (zeigt fremde Gebäude read-only) -->
     {#if !buildDef}
       <InfoPanel
         mobile={$isMobile}
         {selection}
-        {defIndex}
+        defIndex={visiting ? visiting.defIndex : defIndex}
         {resourceIndex}
-        instances={state.instances}
+        instances={visiting ? visiting.instances : state.instances}
         {shortages}
+        {bottlenecks}
         state={state}
         on:close={() => (selection = null)}
         on:changed={(e) => {
@@ -574,7 +643,7 @@
             <p class="mt-2 text-[11px] text-stone-500">Maximal {players.maxAi} KI-Spieler.</p>
           {/if}
           <p class="mt-2 text-[11px] text-stone-500">KI-Inseln entwickeln sich in Echtzeit mit. Klick auf einen Namen springt hin.</p>
-          <OnlineSection />
+          <OnlineSection on:visit={(e) => visitOnline(e.detail.owner)} />
         {:else}
           <p class="text-xs text-stone-500">Lade…</p>
         {/if}
@@ -607,7 +676,7 @@
     {/if}
 
     <!-- Bau-Palette (Desktop: linke Leiste · Mobile: unteres Dock, per 🏗️ getoggelt) -->
-    {#if !$isMobile || showBuild}
+    {#if !visiting && (!$isMobile || showBuild)}
       <BuildPalette
         mobile={$isMobile}
         buildings={content.buildings}
