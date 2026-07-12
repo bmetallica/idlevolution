@@ -221,19 +221,26 @@ erneut gefragt.
 
 Am echten Repo `bmetallica/idlevolution-online` verifiziert:
 
-- ✅ Grundgerüst gepusht (Schema, Validator, Index-Builder, README, Workflows in `setup/`).
-- ✅ PR #1 mit Beispiel-Insel: Pfad-Schutz, Schema-Prüfung, Squash-Merge —
-  alle Action-Schritte 1:1 als Kommandos nachgefahren (identisch zur yml).
+- ✅ Grundgerüst gepusht (Schema, Validator, Index-Builder, README).
+- ✅ PR #1: alle Action-Schritte 1:1 als Kommandos nachgefahren (Pfad-Schutz,
+  Schema-Prüfung, Squash-Merge).
 - ✅ Validator lehnt ab: fremden Ordner, `owner`-Spoofing, unbekannte Felder,
   Übergrößen (lokal getestet).
-- ✅ index.json nach Merge neu gebaut; **tokenloses Lesen** über
-  `raw.githubusercontent.com` funktioniert.
-- ⚠️ Offen: (a) Workflows scharf schalten — der lokale Token hat keinen
-  `workflow`-Scope (`gh auth refresh -h github.com -s workflow`, dann
-  `setup/*.yml` → `.github/workflows/`); (b) Cross-Account-Test (zweiter
-  GitHub-Account nötig) — insbesondere Fork-PR-Verhalten der Action;
-  (c) OAuth App für den Device Flow anlegen (Developer Settings → OAuth Apps
-  → „Enable Device Flow", Client-ID in die Spiel-Konfiguration).
+- ✅ **Workflows aktiv und live getestet**: PR #2 und #3 wurden von der Action
+  selbstständig validiert und gemerged (14–21 s pro Lauf).
+- ✅ **tokenloses Lesen** über `raw.githubusercontent.com` funktioniert.
+- 🔧 Gefundene GitHub-Falle (behoben): Pushes/Merges mit dem Action-eigenen
+  `GITHUB_TOKEN` lösen KEINE weiteren Workflows aus (Rekursionsschutz) — ein
+  separater on:push-Index-Workflow startet nach dem Auto-Merge nie. Der Index
+  wird deshalb direkt im Validierungs-Lauf mitgebaut; `build-index.yml` bleibt
+  als Fallback (täglich per Cron + manuell + direkte Owner-Pushes).
+- ℹ️ `raw.githubusercontent.com` cached ~5 Minuten — für den Daily-Sync
+  irrelevant, aber beim Debuggen nicht vom CDN-Stand täuschen lassen
+  (frischer Stand: Contents-API).
+- ⚠️ Offen: (a) **OAuth App** für den Device Flow anlegen (Developer Settings
+  → OAuth Apps → „Enable Device Flow", nur die Client-ID wird gebraucht,
+  KEIN Client-Secret); (b) Cross-Account-Test (zweiter GitHub-Account) —
+  insbesondere Fork-PR-Verhalten der Action.
 
 ## 8. Bewusst NICHT geplant
 
