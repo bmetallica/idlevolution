@@ -68,8 +68,14 @@ Konzept, Architektur-Begründungen und Sicherheitsmodell: siehe
   Ergebnis/Zeitpunkt/PR-Link
 - ✅ Nächtlicher Upload: Hook in `run-nightly.js` nach der Content-Generierung
   (überspringt sauber, wenn nicht verbunden/freigegeben)
-- ✅ Live verifiziert: echte Insel (237 Gebäude, 72×72) als PR hochgeladen;
-  Bugfix dabei: Engine-Feld heißt `counted`, nicht `done`
+- ✅ Live verifiziert (PR #6, von der Action validiert + gemerged): echte Insel
+  im Repo — 72×72, 237 Gebäude, 373 Straßen, 110 genamespacete Instanzen,
+  packs.json mit 18 Gebäuden / 13 Ressourcen / 3 Epochen inkl. eingefrorener
+  Farben; index.json zeigt „Insel von bmetallica" (Pop 540)
+- ✅ Bugfixes dabei: Engine-Feld heißt `counted` (nicht `done`); Epochen-
+  Pattern im Schema um Bindestrich erweitert (genamespacete Epochen-IDs);
+  Rerun-Falle dokumentiert (pull_request_target checkt den main-Stand vom
+  Event-Zeitpunkt aus — Fixes brauchen ein frisches Event, kein Rerun)
 - ⬜ Cross-Account-Test des Fork-Pfads (braucht zweiten GitHub-Account —
   Owner-Pfad ist verifiziert, Fork-Pfad ist implementiert aber ungetestet)
 
