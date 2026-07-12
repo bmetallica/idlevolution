@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "pack": {
+    "id": "base-military",
+    "source": "human"
+  },
+  "resources": [
+    {
+      "id": "soldiers",
+      "name": {
+        "de": "Soldaten",
+        "en": "Soldiers"
+      },
+      "icon": "⚔️",
+      "category": "special",
+      "epoch": "bronze_age",
+      "baseValue": 25
+    }
+  ],
+  "buildings": [
+    {
+      "id": "barracks",
+      "name": {
+        "de": "Kaserne",
+        "en": "Barracks"
+      },
+      "description": {
+        "de": "Bildet Soldaten aus — für Angriff und Verteidigung. Jede Kaserne beherbergt bis zu 25 Mann."
+      },
+      "category": "production",
+      "epoch": "bronze_age",
+      "icon": "🛡️",
+      "cost": {
+        "wood": 60,
+        "stone": 80,
+        "tools": 20
+      },
+      "buildTimeTicks": 30,
+      "workers": 3,
+      "production": {
+        "inputs": {
+          "tools": 0.08
+        },
+        "outputs": {
+          "soldiers": 0.02
+        }
+      },
+      "storage": {
+        "soldiers": 25
+      },
+      "placement": {
+        "terrain": [
+          "grass"
+        ],
+        "size": {
+          "w": 2,
+          "h": 2
+        }
+      },
+      "meta": {
+        "art": {
+          "shape": "tower",
+          "accent": "#b23a3a",
+          "wall": "#8a8378",
+          "roof": "#5a544b"
+        }
+      }
+    },
+    {
+      "id": "watchtower",
+      "name": {
+        "de": "Wehrturm",
+        "en": "Watchtower"
+      },
+      "description": {
+        "de": "Stärkt die Verteidigung der Insel (+15). Türme kämpfen nur, wenn die Insel angegriffen wird."
+      },
+      "category": "civic",
+      "epoch": "bronze_age",
+      "icon": "🗼",
+      "cost": {
+        "stone": 60,
+        "wood": 20
+      },
+      "buildTimeTicks": 20,
+      "workers": 1,
+      "placement": {
+        "terrain": [
+          "grass",
+          "sand"
+        ],
+        "size": {
+          "w": 1,
+          "h": 1
+        }
+      },
+      "meta": {
+        "art": {
+          "shape": "tower",
+          "accent": "#c9a227"
+        },
+        "military": {
+          "defense": 15
+        }
+      }
+    }
+  ]
+}

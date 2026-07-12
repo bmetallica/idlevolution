@@ -68,8 +68,12 @@ export function tickShips(world, players, tick) {
   if (!world.ships?.length) return delivered;
   world.ships = world.ships.filter((ship) => {
     if (tick >= ship.arriveTick) {
-      const dest = players.find((p) => p.id === ship.toOwner);
-      if (dest) dest.resources[ship.cargo.resourceId] = (dest.resources[ship.cargo.resourceId] || 0) + ship.cargo.amount;
+      // Kriegsschiffe (Stufe 6) liefern keine Fracht aus — die Schlacht wird
+      // vom Aufrufer über resolveBattle() geschlagen.
+      if (ship.type !== 'war') {
+        const dest = players.find((p) => p.id === ship.toOwner);
+        if (dest) dest.resources[ship.cargo.resourceId] = (dest.resources[ship.cargo.resourceId] || 0) + ship.cargo.amount;
+      }
       delivered.push(ship);
       return false;
     }

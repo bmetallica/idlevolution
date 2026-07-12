@@ -415,9 +415,9 @@
     // Rumpf
     ctx.fillStyle = '#6b4a2b';
     ctx.beginPath(); ctx.moveTo(-9, 0); ctx.quadraticCurveTo(0, 6, 9, 0); ctx.lineTo(6, -3); ctx.lineTo(-6, -3); ctx.closePath(); ctx.fill();
-    // Mast + Segel
+    // Mast + Segel (Kriegsschiffe fahren unter rotem Segel)
     ctx.strokeStyle = '#3a2a18'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, -3); ctx.lineTo(0, -16); ctx.stroke();
-    ctx.fillStyle = '#f2ecda';
+    ctx.fillStyle = s.type === 'war' ? '#b03030' : '#f2ecda';
     ctx.beginPath(); ctx.moveTo(1, -15); ctx.lineTo(1, -4); ctx.lineTo(9, -6); ctx.closePath(); ctx.fill();
     ctx.restore();
   }

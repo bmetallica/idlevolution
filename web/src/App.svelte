@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt, onlineTrade, onlineTradeOffer, onlineTradeCancel, onlineTradeAccept } from './lib/api.js';
+  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, attack, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt, onlineTrade, onlineTradeOffer, onlineTradeCancel, onlineTradeAccept } from './lib/api.js';
   import { buildChainIndex, computeShortages, computeBottlenecks } from './lib/chains.js';
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
@@ -145,6 +145,20 @@
   // Ware verschiffen
   let sendTo = null, sendRes = '', sendAmt = 50;
   $: humanHarbor = (players?.players || []).find((p) => p.id === 0)?.harbor;
+  // Krieg (Stufe 6)
+  let atkTo = null, atkSoldiers = 10;
+  $: humanArmy = (players?.players || []).find((p) => p.id === 0)?.army ?? 0;
+  async function launchAttack() {
+    if (!atkTo || !(atkSoldiers > 0) || aiBusy) return;
+    aiBusy = true;
+    try {
+      const r = await attack(atkTo, atkSoldiers);
+      if (!r.ok) throw new Error(r.error);
+      showFlash(`⚔️ ${r.soldiers} Soldaten unterwegs — Ankunft bei Tick ${r.arriveTick}`);
+      await loadPlayers(); await pollState();
+    } catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
   async function sendGoods() {
     if (!sendTo || !sendRes || !(sendAmt > 0) || aiBusy) return;
     aiBusy = true;
@@ -152,9 +166,10 @@
     catch (e) { showFlash(e.message, false); }
     aiBusy = false;
   }
-  // Rangliste: nach Bevölkerung, dann Gebäudezahl (für den Vergleich im 🌍-Panel)
+  // Rangliste: nach Bevölkerung, dann Gebäudezahl (für den Vergleich im 🌍-Panel).
+  // Besiegte bleiben sichtbar (mit ⚔️-erobert-Hinweis), schlicht Abgeschaltete nicht.
   $: rankedPlayers = players
-    ? [...players.players].sort((a, b) => (b.population - a.population) || (b.buildings - a.buildings))
+    ? [...players.players].filter((p) => p.active || p.defeated).sort((a, b) => (b.population - a.population) || (b.buildings - a.buildings))
     : [];
   // Alle Instanzen (Mensch detailliert aus state + KI-Inseln aus /api/players) für die Weltansicht
   // Fremde (KI-)Instanzen werden mit Besitzer markiert → InfoPanel zeigt sie nur an,
@@ -678,7 +693,11 @@
                 <span>{p.kind === 'human' ? '🧑' : '🤖'}</span>
                 <button class="text-left flex-1 min-w-0" title="Zur Insel springen" on:click={() => mapComp?.focusIsland?.(p.islandId)}>
                   <div class="text-stone-200 truncate">{p.name}{p.kind === 'human' ? ' (du)' : ''}{#if p.personality}<span class="text-[10px] text-sky-400/80"> · {p.personality}</span>{/if}</div>
-                  <div class="text-[11px] text-stone-500">Insel {p.islandId} · 👥 {p.population} · {p.epoch || '—'} · 🏠 {p.buildings}</div>
+                  {#if p.defeated}
+                    <div class="text-[11px] text-red-400/90">⚔️ erobert von {p.defeated.by}</div>
+                  {:else}
+                    <div class="text-[11px] text-stone-500">Insel {p.islandId} · 👥 {p.population} · {p.epoch || '—'} · 🏠 {p.buildings}{#if p.army || p.defense} · <span title="Armee / Verteidigung">⚔️{p.army} 🛡️{p.defense}</span>{/if}</div>
+                  {/if}
                   {#if p.strategy}<div class="text-[11px] text-sky-300/80 truncate" title={p.strategy}>🎯 {p.strategy}</div>{/if}
                   {#if p.chronicle}<div class="text-[11px] text-stone-400 italic truncate" title={p.chronicle}>„{p.chronicle}"</div>{/if}
                 </button>
@@ -713,6 +732,34 @@
               <p class="text-[11px] text-stone-500">Baue einen ⚓ <b>Hafen</b>, um Waren zu anderen Inseln zu verschiffen.</p>
             {/if}
           </div>
+
+          <!-- Krieg (Stufe 6): Angriff auf eine Nachbarinsel -->
+          {#if humanHarbor && humanArmy > 0}
+            {@const targets = players.players.filter((p) => p.id !== 0 && p.active)}
+            {#if targets.length}
+              <div class="mt-2.5 pt-2 border-t border-stone-800">
+                <div class="text-[11px] text-red-300/90 mb-1">⚔️ Angriff <span class="text-stone-600">({humanArmy} Soldaten verfügbar · Sieg erobert die Insel)</span></div>
+                <div class="flex gap-1">
+                  <select bind:value={atkTo} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
+                    <option value={null}>Ziel…</option>
+                    {#each targets as p}<option value={p.islandId}>{p.name} (🛡️{p.defense})</option>{/each}
+                  </select>
+                  <input type="number" min="1" max={humanArmy} bind:value={atkSoldiers} class="w-14 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
+                  <button class="rounded bg-red-800 hover:bg-red-700 disabled:opacity-40 px-2 text-white" on:click={launchAttack} disabled={aiBusy || !atkTo || !(atkSoldiers > 0)} title="Angreifen — Kriegsschiff läuft aus">⚔️</button>
+                </div>
+              </div>
+            {/if}
+          {/if}
+
+          <!-- Kriegs-Protokoll -->
+          {#if players.warLog?.length}
+            <div class="mt-2.5 pt-2 border-t border-stone-800 space-y-0.5">
+              <div class="text-[11px] text-stone-400">📜 Kriegs-Protokoll</div>
+              {#each players.warLog as w}
+                <p class="text-[11px] text-stone-500">{w.report}</p>
+              {/each}
+            </div>
+          {/if}
 
           {#if (players.players.filter((p) => p.kind === 'ai').length) < (players.maxAi ?? 4)}
             <button class="mt-2.5 w-full rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-50 px-3 py-1.5 text-sm text-white" on:click={addAi} disabled={aiBusy || !(players.freeSlots || []).length}>

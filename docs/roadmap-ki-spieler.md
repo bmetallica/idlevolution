@@ -205,13 +205,27 @@ Feld finden:
   liefern. Preise nach Angebot/Nachfrage, Reputation. KI handelt im Tageszug;
   faire Angebote nimmt der Executor auch sofort per Regel an.
 
-### Stufe 6 — Kriegssystem *(am komplexesten)*
-- Militärgebäude/-einheiten, Kriegsschiffe, Angriff auf Inseln, Kampfauflösung,
-  **Besetzung/Übernahme** (übernommene Insel wird Territorium des Siegers → dann
-  darf dort gebaut werden).
-- Verteidigung über stehende Anlagen (Executor greift sofort), Vergeltung im
-  Tageszug nach Persönlichkeit/`aggression`.
-- Braucht sorgfältiges Balancing und fairen Umgang mit der Zeit-Asymmetrie.
+### Stufe 6 — Kriegssystem ✅ *(umgesetzt 2026-07-12)*
+- **Militär als Content** (base-military-Pack): ⚔️ Soldaten (Ressource),
+  🛡️ Kaserne (bildet aus, +25 Lager je Kaserne), 🗼 Wehrturm
+  (`meta.military.defense` — datengetrieben, auch KI-Packs können eigene
+  Wehranlagen erfinden).
+- **Kampf** (`engine/war.js`): Angriff per Kriegsschiff (rotes Segel, Ziel
+  braucht keinen Hafen); bei Ankunft Angriffskraft (Soldaten) gegen
+  Verteidigung (Soldaten + Anlagen + 5 % Miliz), ±15 % Kriegsglück.
+  Niederlage kostet die Truppe; der Verteidiger verliert anteilig Soldaten.
+- **Eroberung**: Sieg überträgt Territorium (`state.regions` — canPlace prüft
+  mehrere Regionen), Gebäude (unbemannt), Straßen/Deko und die halbe
+  Bevölkerung; Überlebende garnisonieren. Der Besiegte ist raus
+  (⚔️-erobert-Anzeige), sein Insel-Platz zählt nicht als frei.
+- **Verteidigung der KI**: Executor baut ab 40 Einwohnern eine Kaserne und je
+  80 Einwohner einen Wehrturm (sofort greifend, ohne LLM).
+- **UI**: ⚔️/🛡️-Stärken in der 🌍-Rangliste, Angriffs-Formular (ab Hafen +
+  Soldaten), 📜 Kriegs-Protokoll (world.warLog, Migration 008).
+- **Bewusst v1**: Die KI greift NICHT von sich aus an (nur Verteidigung) —
+  Vergeltung nach Persönlichkeit/`aggression` im Tageszug ist der nächste
+  Ausbau, wenn sich das Grundsystem im Spiel bewährt. 5 Kriegs-Tests
+  (63 gesamt), Ende-zu-Ende-Simulation gegen die echte Registry verifiziert.
 
 ## Querschnitts-Überlegungen
 

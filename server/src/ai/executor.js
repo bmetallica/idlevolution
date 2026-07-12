@@ -127,6 +127,16 @@ function chooseBuild(registry, player, game) {
       const h = cands.find((c) => c.id === 'harbor' && staffable(c));
       if (h) return h;
     }
+    // WEHR) Grundverteidigung (Stufe 6): ab 40 Einwohnern EINE Kaserne und je
+    //        80 Einwohner einen Wehrturm — rein defensiv, damit die Insel nicht
+    //        schutzlos ist. Datengetrieben über meta.military.defense.
+    if (player.population > 40) {
+      const built = (id) => (player.instances || []).filter((i) => i.buildingId === id).length;
+      const barracks = cands.find((c) => Object.keys(c.production?.outputs || {}).some((r) => r === 'soldiers') && staffable(c));
+      if (barracks && built(barracks.id) < 1) return barracks;
+      const tower = cands.find((c) => c.meta?.military?.defense && staffable(c));
+      if (tower && built(tower.id) < Math.floor(player.population / 80)) return tower;
+    }
     // PLAN) LLM-Bauplan des Strategen abarbeiten (Stufe 2), auf dem Sicherheitsnetz
     //       (Nahrung/Baumaterial) aufsetzend: nächstes offenes Ziel bauen; ist es
     //       noch nicht baubar, dessen fehlende Kosten-Vorkette sichern.

@@ -12,6 +12,7 @@ import { growIslandRegion } from './engine/world.js';
 import { runExecutor } from './ai/executor.js';
 import { tickShips } from './engine/ships.js';
 import { aiConsiderTrade, aiPostOffer } from './engine/trade.js';
+import { resolveBattle, logWar } from './engine/war.js';
 import gameRoutes from './routes/game.js';
 import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
@@ -96,7 +97,25 @@ const interval = setInterval(async () => {
     }
     // Schiffe (Stufe 4) über den Ozean vorrücken; angekommene Ladung ausliefern.
     const delivered = tickShips(world, players, human.tick);
-    for (const s of delivered) logEvent(pool, 'ship_arrived', { from: s.owner, to: s.toOwner, cargo: s.cargo }).catch(() => {});
+    for (const s of delivered) {
+      if (s.type === 'war') {
+        // Stufe 6: Schlacht bei Ankunft des Kriegsschiffs
+        const result = resolveBattle(world, players, s, registryHolder.registry);
+        logWar(world, result.report, human.tick);
+        log.info(`Krieg: ${result.report}`);
+        logEvent(pool, 'battle', { attacker: s.owner, defender: s.toOwner, victory: result.victory }).catch(() => {});
+        if (result.victory) {
+          // Eroberung sofort persistieren (Sieger + besiegter Spieler + Welt)
+          const winner = players.find((p) => p.id === s.owner);
+          const loser = players.find((p) => p.id === s.toOwner);
+          if (winner) await savePlayer(pool, winner);
+          if (loser) await savePlayer(pool, loser);
+          await saveWorld(pool, world);
+        }
+      } else {
+        logEvent(pool, 'ship_arrived', { from: s.owner, to: s.toOwner, cargo: s.cargo }).catch(() => {});
+      }
+    }
     tickCounter += 1;
     if (delivered.length || tickCounter % config.persistEveryTicks === 0) {
       for (const p of players) {

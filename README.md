@@ -53,8 +53,9 @@ Bis zu **4 zuschaltbare KI-Spieler** besiedeln eigene Inseln auf derselben Weltk
 - **Stratege + Taktiker**: Die lokale LLM plant einmal täglich Strategie, Bauplan und Persönlichkeit jedes KI-Spielers; ein deterministischer Executor setzt den Plan Tick für Tick um (Arbeiter zuweisen, Ketten bauen, Epochen aufsteigen).
 - **Nachbarn immer sichtbar**: Kamera-Schwenk oder Klick im 🌍-Panel springt zur Insel; Rangliste nach Bevölkerung, Strategie und Chronik je Insel. Fremde Gebäude sind read-only.
 - **Handel**: KI-Spieler bauen Häfen, nehmen faire Angebote an und stellen eigene ein — der Markt belebt sich von selbst.
+- **⚔️ Krieg & Eroberung**: Soldaten in der 🛡️ Kaserne ausbilden, per Kriegsschiff angreifen — Sieg erobert die Insel (Territorium, Gebäude und halbe Bevölkerung gehen über, dann darfst du dort bauen). KI-Inseln verteidigen sich mit Soldaten, 🗼 Wehrtürmen und Miliz.
 
-Roadmap & Details: [`docs/roadmap-ki-spieler.md`](docs/roadmap-ki-spieler.md) (Stufe 6 „Krieg" bewusst offen).
+Roadmap & Details: [`docs/roadmap-ki-spieler.md`](docs/roadmap-ki-spieler.md) — alle 6 Stufen umgesetzt.
 
 ---
 
@@ -247,8 +248,9 @@ So kann die KI für neue Zeitalter neue Materialien, Gegenstände, Gebäude und 
 | `POST /api/rotate` `{instanceId}` | Gebäude um 90° drehen |
 | `POST /api/workers` `{buildingId, delta}` | Arbeiter zuweisen |
 | `POST /api/road` `{tiles, on}` | Straßen bauen/abreißen |
-| `GET /api/players` · `POST /api/players/enable|disable` | KI-Mitspieler ansehen / zu- & abschalten |
+| `GET /api/players` · `POST /api/players/enable|disable` | KI-Mitspieler ansehen / zu- & abschalten (inkl. ⚔️/🛡️-Stärken + Kriegs-Protokoll) |
 | `POST /api/ship` `{toIsland, resourceId, amount}` | Ware per Schiff zu einer Nachbarinsel |
+| `POST /api/attack` `{targetIsland, soldiers}` | Angriff per Kriegsschiff — Sieg erobert die Insel |
 | `GET /api/market` · `POST /api/market/offer|accept|cancel` | Handels-Angebote (Treuhand + Schiffs-Lieferung) |
 | `POST /api/online/connect` · `GET /api/online/status` | GitHub-Login (Device Flow) für den Online-Modus |
 | `POST /api/online/publish` | Eigene Insel + LLM-Packs als PR ins Community-Repo |
