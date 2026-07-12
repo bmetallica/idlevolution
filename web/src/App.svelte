@@ -9,6 +9,7 @@
   import InfoPanel from './components/InfoPanel.svelte';
   import Chronicle from './components/Chronicle.svelte';
   import AiAssist from './components/AiAssist.svelte';
+  import OnlineSection from './components/OnlineSection.svelte';
   import { isMobile, portrait } from './lib/device.js';
 
   let mobileMenu = false; // ausgeklapptes Menü-FAB (nur Mobile)
@@ -573,6 +574,7 @@
             <p class="mt-2 text-[11px] text-stone-500">Maximal {players.maxAi} KI-Spieler.</p>
           {/if}
           <p class="mt-2 text-[11px] text-stone-500">KI-Inseln entwickeln sich in Echtzeit mit. Klick auf einen Namen springt hin.</p>
+          <OnlineSection />
         {:else}
           <p class="text-xs text-stone-500">Lade…</p>
         {/if}

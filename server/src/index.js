@@ -15,6 +15,7 @@ import { aiConsiderTrade, aiPostOffer } from './engine/trade.js';
 import gameRoutes from './routes/game.js';
 import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
+import onlineRoutes from './routes/online.js';
 
 const fastify = Fastify({ logger: { level: 'info' } });
 const log = fastify.log;
@@ -58,6 +59,7 @@ fastify.get('/healthz', async () => ({ ok: true, tick: human.tick }));
 await fastify.register(gameRoutes);
 await fastify.register(contentRoutes);
 await fastify.register(aiRoutes);
+await fastify.register(onlineRoutes);
 
 // Gebautes Frontend ausliefern (Multi-Stage-Build legt es nach ./public)
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');

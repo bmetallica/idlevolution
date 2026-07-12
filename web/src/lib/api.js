@@ -73,6 +73,12 @@ export const cancelOffer = (offerId) => post('/api/market/cancel', { offerId });
 
 export const fetchAiLog = () => fetch('/api/ai-log').then(json);
 
+// Online-Modus (Multiplayer über GitHub)
+export const onlineStatus = () => fetch('/api/online/status').then(json);
+export const onlineConnect = () => post('/api/online/connect');
+export const onlineDisconnect = () => post('/api/online/disconnect');
+export const onlineAcceptDisclaimer = () => post('/api/online/disclaimer');
+
 export const disablePack = (packId) =>
   fetch('/api/pack/disable', {
     method: 'POST',

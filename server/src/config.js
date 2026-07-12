@@ -24,6 +24,13 @@ export const config = {
     temperature: num(process.env.LLM_TEMPERATURE, 0.7),
   },
 
+  // Online-Modus (Multiplayer über GitHub, docs/roadmap-multiplayer.md).
+  // Die Client-ID ist öffentlich — der Device Flow braucht kein Secret.
+  online: {
+    clientId: process.env.ONLINE_CLIENT_ID || 'Ov23lih2yPEXcAEKwEc3',
+    repo: process.env.ONLINE_REPO || 'bmetallica/idlevolution-online',
+  },
+
   appUrl: (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, ''),
   aiCron: process.env.AI_CRON || '0 3 * * *',
   aiRunOnStart: process.env.AI_RUN_ON_START === 'true',
