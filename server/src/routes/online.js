@@ -2,6 +2,8 @@
 // Der Poll-Loop läuft serverseitig; der Client fragt nur /status ab.
 
 import { startDeviceFlow, pollToken, fetchGithubUser, loadOnline, saveOnline } from '../online/auth.js';
+import { buildIslandExport, buildPacksExport } from '../online/exporter.js';
+import { publishFiles } from '../online/github.js';
 
 export const DISCLAIMER_VERSION = 1;
 
@@ -75,7 +77,39 @@ export default async function onlineRoutes(fastify) {
       pending: p?.userCode ? { userCode: p.userCode, verificationUri: p.verificationUri } : null,
       error: p?.error || null,
       repo: ctx.config.online.repo,
+      lastPublish: s.lastPublish || null, // {at, prUrl, instances}
     };
+  });
+
+  // Insel veröffentlichen (M1): Export → Fork/Branch → PR; Action merged automatisch
+  let publishing = false;
+  fastify.post('/api/online/publish', async (req, reply) => {
+    const s = ctx.online.settings;
+    if (!s.token) { reply.code(400); return { ok: false, error: 'Nicht mit GitHub verbunden' }; }
+    if ((s.disclaimerVersion || 0) < DISCLAIMER_VERSION) { reply.code(400); return { ok: false, error: 'Freigabe (Disclaimer) fehlt' }; }
+    if (publishing) { reply.code(409); return { ok: false, error: 'Veröffentlichung läuft bereits' }; }
+    publishing = true;
+    try {
+      const island = buildIslandExport(ctx, s.username);
+      const packs = buildPacksExport(ctx, s.username);
+      const files = [
+        { path: `islands/${s.username}/island.json`, content: JSON.stringify(island, null, 1) + '\n' },
+        { path: `islands/${s.username}/packs.json`, content: JSON.stringify(packs, null, 1) + '\n' },
+      ];
+      for (const f of files) {
+        if (Buffer.byteLength(f.content) > 512 * 1024) throw new Error(`${f.path} überschreitet 512 KB`);
+      }
+      const { prUrl } = await publishFiles(s.token, s.username, ctx.config.online.repo, files);
+      ctx.online.settings = { ...s, lastPublish: { at: new Date().toISOString(), prUrl, instances: island.instances.length } };
+      await saveOnline(ctx.pool, ctx.online.settings);
+      fastify.log.info(`Online-Modus: Insel veröffentlicht (${island.instances.length} Gebäude) → ${prUrl}`);
+      return { ok: true, prUrl, instances: island.instances.length };
+    } catch (err) {
+      reply.code(502);
+      return { ok: false, error: err.message };
+    } finally {
+      publishing = false;
+    }
   });
 
   // Disclaimer-Zustimmung („Insel online freigeben — auf eigene Gefahr")

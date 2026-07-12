@@ -62,6 +62,15 @@ export async function runNightly(log = console) {
     log.warn?.(`[nightly] KI-Planung übersprungen: ${err.message}`);
   }
 
+  // Online-Modus (Multiplayer M1): Insel nächtlich veröffentlichen — nur wenn
+  // der Spieler verbunden ist und der Freigabe zugestimmt hat (sonst 400).
+  try {
+    const pub = await api('POST', '/api/online/publish', {});
+    if (pub?.ok) log.info?.(`[nightly] Insel online veröffentlicht (${pub.instances} Gebäude)`);
+  } catch (err) {
+    log.info?.(`[nightly] Online-Veröffentlichung übersprungen: ${err.message}`);
+  }
+
   if (result.status === 'rejected') {
     log.warn?.(`[nightly] Pack abgelehnt: ${JSON.stringify(result.rejected).slice(0, 500)}`);
   } else {

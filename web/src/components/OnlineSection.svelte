@@ -2,12 +2,13 @@
   // Online-Modus (M0): GitHub-Verbindung per Device Flow + Disclaimer.
   // Sitzt unten im 🌍-Nachbarn-Panel. Der Token bleibt immer auf dem Server.
   import { onMount, onDestroy } from 'svelte';
-  import { onlineStatus, onlineConnect, onlineDisconnect, onlineAcceptDisclaimer } from '../lib/api.js';
+  import { onlineStatus, onlineConnect, onlineDisconnect, onlineAcceptDisclaimer, onlinePublish } from '../lib/api.js';
 
   let st = null; // /api/online/status
   let busy = false;
   let showDisclaimer = false;
   let timer = 0;
+  let publishMsg = null; // { ok, text }
 
   async function refresh() {
     try { st = await onlineStatus(); } catch {}
@@ -30,6 +31,17 @@
     try { await onlineAcceptDisclaimer(); showDisclaimer = false; await refresh(); } catch {}
     busy = false;
   }
+  async function publish() {
+    if (busy) return; busy = true; publishMsg = null;
+    try {
+      const r = await onlinePublish();
+      publishMsg = r.ok
+        ? { ok: true, text: `✓ Hochgeladen (${r.instances} Gebäude) — die Prüfung im Repo merged automatisch.` }
+        : { ok: false, text: r.error || 'Fehlgeschlagen' };
+      await refresh();
+    } catch (e) { publishMsg = { ok: false, text: e.message }; }
+    busy = false;
+  }
 
   onMount(refresh);
   onDestroy(() => clearTimeout(timer));
@@ -47,7 +59,18 @@
       <button class="ml-auto text-[11px] text-stone-500 hover:text-red-300" on:click={disconnect} disabled={busy}>trennen</button>
     </div>
     {#if st.disclaimerAccepted}
-      <p class="mt-1 text-[11px] text-emerald-400/90">✓ Freigabe erteilt — die Veröffentlichung deiner Insel folgt mit der nächsten Ausbaustufe.</p>
+      <button class="mt-1.5 w-full rounded bg-emerald-800 hover:bg-emerald-700 disabled:opacity-50 px-3 py-1.5 text-sm text-white" on:click={publish} disabled={busy}>
+        {busy ? '⏳ Lade hoch…' : '🏝️ Insel jetzt veröffentlichen'}
+      </button>
+      {#if publishMsg}
+        <p class="mt-1 text-[11px] {publishMsg.ok ? 'text-emerald-400/90' : 'text-red-400'}">{publishMsg.text}</p>
+      {/if}
+      {#if st.lastPublish}
+        <p class="mt-0.5 text-[11px] text-stone-500">
+          Zuletzt: {new Date(st.lastPublish.at).toLocaleString('de-DE')} · {st.lastPublish.instances} Gebäude
+          {#if st.lastPublish.prUrl}· <a class="text-sky-400 underline" href={st.lastPublish.prUrl} target="_blank" rel="noopener noreferrer">PR</a>{/if}
+        </p>
+      {/if}
     {:else}
       <button class="mt-1.5 w-full rounded bg-emerald-800 hover:bg-emerald-700 disabled:opacity-50 px-3 py-1.5 text-sm text-white" on:click={() => (showDisclaimer = true)} disabled={busy}>
         🏝️ Insel online freigeben…

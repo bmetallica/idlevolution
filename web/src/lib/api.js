@@ -78,6 +78,7 @@ export const onlineStatus = () => fetch('/api/online/status').then(json);
 export const onlineConnect = () => post('/api/online/connect');
 export const onlineDisconnect = () => post('/api/online/disconnect');
 export const onlineAcceptDisclaimer = () => post('/api/online/disclaimer');
+export const onlinePublish = () => post('/api/online/publish');
 
 export const disablePack = (packId) =>
   fetch('/api/pack/disable', {

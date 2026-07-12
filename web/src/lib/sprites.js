@@ -82,7 +82,7 @@ export function paletteFor(def, epochOrder = 0) {
     wall: art.wall || shade(base.wall, 0.9 + ((h >> 3) & 15) / 60),
     roof: art.roof || shade(base.roof, 0.85 + ((h >> 7) & 15) / 50),
     accent: art.accent || hslHex((h % 360), 55, 55),
-    seed: h,
+    seed: art.seed ?? h, // eingefroren bei Online-Content (ID-Umbenennung ändert sonst die Optik)
   };
 }
 
