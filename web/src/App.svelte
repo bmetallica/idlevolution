@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, attack, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt, onlineTrade, onlineTradeOffer, onlineTradeCancel, onlineTradeAccept } from './lib/api.js';
+  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, attack, cancelAttack, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt, onlineTrade, onlineTradeOffer, onlineTradeCancel, onlineTradeAccept } from './lib/api.js';
   import { buildChainIndex, computeShortages, computeBottlenecks } from './lib/chains.js';
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
@@ -12,6 +12,7 @@
   import OnlineSection from './components/OnlineSection.svelte';
   import { isMobile, portrait } from './lib/device.js';
 
+  let topBarH = 48; // gemessene Höhe der Materialleiste → alles darunter weicht dynamisch aus
   let mobileMenu = false; // ausgeklapptes Menü-FAB (nur Mobile)
   let eraseMode = false; // Radier-Umschalter für Straßen/Deko (statt Rechtsklick, nur Mobile)
   let showBuild = false; // Bau-Dock ein-/ausklappen (nur Mobile)
@@ -145,7 +146,7 @@
   // Ware verschiffen
   let sendTo = null, sendRes = '', sendAmt = 50;
   $: humanHarbor = (players?.players || []).find((p) => p.id === 0)?.harbor;
-  // Krieg (Stufe 6)
+  // Krieg (Stufe 6 v2): tagsüber erklären, die Schlacht schlägt sich nachts
   let atkTo = null, atkSoldiers = 10;
   $: humanArmy = (players?.players || []).find((p) => p.id === 0)?.army ?? 0;
   async function launchAttack() {
@@ -154,7 +155,17 @@
     try {
       const r = await attack(atkTo, atkSoldiers);
       if (!r.ok) throw new Error(r.error);
-      showFlash(`⚔️ ${r.soldiers} Soldaten unterwegs — Ankunft bei Tick ${r.arriveTick}`);
+      showFlash(`⚔️ Krieg erklärt — ${r.soldiers} Soldaten schlagen in der kommenden Nacht zu`);
+      await loadPlayers(); await pollState();
+    } catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  async function withdrawAttack(defenderId) {
+    if (aiBusy) return; aiBusy = true;
+    try {
+      const r = await cancelAttack(defenderId);
+      if (!r.ok) throw new Error(r.error);
+      showFlash(`↩️ Kriegserklärung zurückgezogen — ${r.soldiers} Soldaten kehren zurück`);
       await loadPlayers(); await pollState();
     } catch (e) { showFlash(e.message, false); }
     aiBusy = false;
@@ -166,10 +177,9 @@
     catch (e) { showFlash(e.message, false); }
     aiBusy = false;
   }
-  // Rangliste: nach Bevölkerung, dann Gebäudezahl (für den Vergleich im 🌍-Panel).
-  // Besiegte bleiben sichtbar (mit ⚔️-erobert-Hinweis), schlicht Abgeschaltete nicht.
+  // Rangliste: nach Bevölkerung, dann Gebäudezahl (für den Vergleich im 🌍-Panel)
   $: rankedPlayers = players
-    ? [...players.players].filter((p) => p.active || p.defeated).sort((a, b) => (b.population - a.population) || (b.buildings - a.buildings))
+    ? [...players.players].sort((a, b) => (b.population - a.population) || (b.buildings - a.buildings))
     : [];
   // Alle Instanzen (Mensch detailliert aus state + KI-Inseln aus /api/players) für die Weltansicht
   // Fremde (KI-)Instanzen werden mit Besitzer markiert → InfoPanel zeigt sie nur an,
@@ -369,20 +379,20 @@
     <!-- Obere HUD-Leiste (über der Werkzeugleiste, damit die Ressourcen-Tooltips
          nicht von den Buttons überlagert werden) -->
     <!-- Mobile: Leiste zwischen 🏗️ (links) und ☰ (rechts) einpassen statt darunter -->
-    <div class="absolute top-0 z-40 safe-top {$isMobile ? 'left-[52px] right-[52px]' : 'inset-x-0'}">
+    <div class="absolute top-0 z-40 safe-top {$isMobile ? 'left-[52px] right-[52px]' : 'inset-x-0'}" bind:clientHeight={topBarH}>
       <ResourceBar {state} {resourceIndex} compact={$isMobile} />
     </div>
 
     <!-- Epochen-Panel oben, rechts neben der Bau-Seitenleiste (Desktop) -->
     {#if !$isMobile}
-      <div class="absolute top-14 left-[19rem] z-20 w-[min(56vw,560px)]">
+      <div class="absolute left-[19rem] z-20 w-[min(56vw,560px)]" style="top: {topBarH + 8}px">
         <EpochBanner {state} epochs={content.epochs} {resourceIndex} buildings={content.buildings} />
       </div>
     {/if}
 
-    <!-- Werkzeugleiste oben rechts (Desktop) -->
+    <!-- Werkzeugleiste oben rechts (Desktop) — weicht der Materialleiste dynamisch aus -->
     {#if !$isMobile}
-    <div class="absolute top-14 right-3 z-30 flex gap-2">
+    <div class="absolute right-3 z-30 flex gap-2" style="top: {topBarH + 8}px">
       <button
         class="border rounded px-3 py-1.5 text-sm {roadMode
           ? 'bg-amber-800 border-amber-500 text-amber-100'
@@ -537,6 +547,7 @@
     {#if !buildDef}
       <InfoPanel
         mobile={$isMobile}
+        topOffset={topBarH + 8}
         {selection}
         defIndex={visiting ? visiting.defIndex : defIndex}
         {resourceIndex}
@@ -554,7 +565,7 @@
 
     <!-- KI-Zentrale-Schublade -->
     {#if showChronicle}
-      <div class={$isMobile ? 'mobile-sheet p-2' : 'absolute top-28 right-3 z-30 w-96 max-w-[92vw]'}>
+      <div class={$isMobile ? 'mobile-sheet p-2' : 'absolute right-3 z-30 w-96 max-w-[92vw]'} style={$isMobile ? '' : `top: ${topBarH + 52}px`}>
         <Chronicle
           packs={content.packs}
           on:close={() => (showChronicle = false)}
@@ -569,7 +580,7 @@
 
     <!-- Handelsmarkt-Panel (Stufe 5) -->
     {#if showMarket}
-      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute top-28 right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-amber-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 max-h-[70vh] overflow-y-auto'}>
+      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-amber-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 overflow-y-auto'} style={$isMobile ? '' : `top: ${topBarH + 52}px; max-height: calc(100vh - ${topBarH + 64}px)`}>
         <div class="flex items-center gap-2 mb-2">
           <span class="text-sm font-semibold text-amber-200">🪙 Handelsmarkt</span>
           <button class="ml-auto text-stone-500 hover:text-stone-200" on:click={() => (showMarket = false)}>✕</button>
@@ -680,7 +691,8 @@
 
     <!-- Nachbarn / KI-Spieler-Panel -->
     {#if showPlayers}
-      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute top-28 right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-sky-800 bg-stone-900/95 backdrop-blur shadow-xl p-3'}>
+      <!-- scrollbar: auf kleinen Displays war der untere Teil sonst unerreichbar -->
+      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-sky-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 overflow-y-auto'} style={$isMobile ? '' : `top: ${topBarH + 52}px; max-height: calc(100vh - ${topBarH + 64}px)`}>
         <div class="flex items-center gap-2 mb-2">
           <span class="text-sm font-semibold text-sky-200">🌍 Nachbarn</span>
           <button class="ml-auto text-stone-500 hover:text-stone-200" on:click={() => (showPlayers = false)}>✕</button>
@@ -693,11 +705,7 @@
                 <span>{p.kind === 'human' ? '🧑' : '🤖'}</span>
                 <button class="text-left flex-1 min-w-0" title="Zur Insel springen" on:click={() => mapComp?.focusIsland?.(p.islandId)}>
                   <div class="text-stone-200 truncate">{p.name}{p.kind === 'human' ? ' (du)' : ''}{#if p.personality}<span class="text-[10px] text-sky-400/80"> · {p.personality}</span>{/if}</div>
-                  {#if p.defeated}
-                    <div class="text-[11px] text-red-400/90">⚔️ erobert von {p.defeated.by}</div>
-                  {:else}
-                    <div class="text-[11px] text-stone-500">Insel {p.islandId} · 👥 {p.population} · {p.epoch || '—'} · 🏠 {p.buildings}{#if p.army || p.defense} · <span title="Armee / Verteidigung">⚔️{p.army} 🛡️{p.defense}</span>{/if}</div>
-                  {/if}
+                  <div class="text-[11px] text-stone-500">Insel {p.islandId} · 👥 {p.population} · {p.epoch || '—'} · 🏠 {p.buildings}{#if p.army || p.defense} · <span title="Armee / Verteidigung">⚔️{p.army} 🛡️{p.defense}</span>{/if}</div>
                   {#if p.strategy}<div class="text-[11px] text-sky-300/80 truncate" title={p.strategy}>🎯 {p.strategy}</div>{/if}
                   {#if p.chronicle}<div class="text-[11px] text-stone-400 italic truncate" title={p.chronicle}>„{p.chronicle}"</div>{/if}
                 </button>
@@ -733,22 +741,36 @@
             {/if}
           </div>
 
-          <!-- Krieg (Stufe 6): Angriff auf eine Nachbarinsel -->
-          {#if humanHarbor && humanArmy > 0}
+          <!-- Krieg (Stufe 6 v2): tagsüber erklären, Schlacht in der Nacht — kein Erobern, nur Beute -->
+          {#if humanArmy > 0}
             {@const targets = players.players.filter((p) => p.id !== 0 && p.active)}
             {#if targets.length}
               <div class="mt-2.5 pt-2 border-t border-stone-800">
-                <div class="text-[11px] text-red-300/90 mb-1">⚔️ Angriff <span class="text-stone-600">({humanArmy} Soldaten verfügbar · Sieg erobert die Insel)</span></div>
+                <div class="text-[11px] text-red-300/90 mb-1">⚔️ Raubzug erklären <span class="text-stone-600">({humanArmy} Soldaten · Schlacht in der kommenden Nacht · Sieger plündert Beute)</span></div>
                 <div class="flex gap-1">
                   <select bind:value={atkTo} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
                     <option value={null}>Ziel…</option>
                     {#each targets as p}<option value={p.islandId}>{p.name} (🛡️{p.defense})</option>{/each}
                   </select>
                   <input type="number" min="1" max={humanArmy} bind:value={atkSoldiers} class="w-14 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
-                  <button class="rounded bg-red-800 hover:bg-red-700 disabled:opacity-40 px-2 text-white" on:click={launchAttack} disabled={aiBusy || !atkTo || !(atkSoldiers > 0)} title="Angreifen — Kriegsschiff läuft aus">⚔️</button>
+                  <button class="rounded bg-red-800 hover:bg-red-700 disabled:opacity-40 px-2 text-white" on:click={launchAttack} disabled={aiBusy || !atkTo || !(atkSoldiers > 0)} title="Krieg erklären — Schlacht in der kommenden Nacht">⚔️</button>
                 </div>
               </div>
             {/if}
+          {/if}
+
+          <!-- Offene Kriegserklärungen (öffentlich — Schlacht in der kommenden Nacht) -->
+          {#if players.warDeclarations?.length}
+            <div class="mt-2 space-y-0.5">
+              {#each players.warDeclarations as d}
+                <div class="flex items-center gap-1 text-[11px] {d.defenderId === 0 ? 'text-red-300' : 'text-amber-300/90'}">
+                  <span>{d.retaliation ? '🔥' : '⚔️'} {d.attacker} → {d.defender} ({d.soldiers} Soldaten, heute Nacht)</span>
+                  {#if d.attackerId === 0}
+                    <button class="ml-auto text-stone-500 hover:text-stone-200" title="Zurückziehen" on:click={() => withdrawAttack(d.defenderId)} disabled={aiBusy}>↩️</button>
+                  {/if}
+                </div>
+              {/each}
+            </div>
           {/if}
 
           <!-- Kriegs-Protokoll -->
@@ -778,7 +800,7 @@
 
     <!-- KI-Berater-Panel -->
     {#if showAssist}
-      <div class={$isMobile ? 'mobile-sheet p-2' : 'absolute top-28 right-3 z-30 w-96 max-w-[92vw]'}>
+      <div class={$isMobile ? 'mobile-sheet p-2' : 'absolute right-3 z-30 w-96 max-w-[92vw]'} style={$isMobile ? '' : `top: ${topBarH + 52}px`}>
         <AiAssist on:close={() => (showAssist = false)} />
       </div>
     {/if}

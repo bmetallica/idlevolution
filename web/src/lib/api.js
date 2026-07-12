@@ -63,6 +63,12 @@ export const attack = (targetIsland, soldiers) =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ targetIsland, soldiers }),
   }).then(json);
+export const cancelAttack = (targetPlayer) =>
+  fetch('/api/attack/cancel', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ targetPlayer }),
+  }).then(json);
 export const enableAi = () => fetch('/api/players/enable', { method: 'POST' }).then(json);
 export const disableAi = (playerId) =>
   fetch('/api/players/disable', {

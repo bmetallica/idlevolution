@@ -21,9 +21,10 @@
 </script>
 
 <div class="{compact ? 'px-2 py-1 rounded-b-lg border-x' : 'px-4 py-2'} bg-stone-950/90 backdrop-blur border-b border-stone-800">
-  <!-- Immer EINE Zeile: bei Platzmangel horizontal scrollen statt umbrechen
-       (mehrzeilig würde die Werkzeugleiste darunter verdecken) -->
-  <div class="flex items-center flex-nowrap overflow-x-auto {compact ? 'gap-x-3 text-xs' : 'gap-x-5 text-sm'}">
+  <!-- Desktop: mehrzeilig umbrechend (übersichtlich) — Werkzeugleiste & Panels
+       positionieren sich dynamisch UNTER der gemessenen Leisten-Höhe.
+       Mobile (compact): eine Zeile mit horizontalem Scrollen (zwischen den FABs). -->
+  <div class="flex items-center {compact ? 'flex-nowrap overflow-x-auto gap-x-3 text-xs' : 'flex-wrap gap-x-5 gap-y-1 text-sm'}">
     <span class="flex items-center gap-1 shrink-0 {state.popTrend === 'shrinking' ? 'text-red-400' : ''}" title={state.popReason || 'Bevölkerung / Wohnraum'}>
       <span>👥</span>
       <span class="font-mono">{Math.floor(state.population)}/{state.housing}</span>

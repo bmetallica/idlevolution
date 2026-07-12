@@ -1,9 +1,8 @@
-// Tests für das Kriegssystem (Stufe 6): Stärken, Angriff, Schlacht (rng
-// injiziert = deterministisch), Eroberung inkl. Territorium-Übernahme und
-// Mehr-Regionen-canPlace.
+// Tests für das Kriegssystem v2: Raubzüge im Tagesrhythmus, KEINE Eroberung —
+// jede Insel bleibt bei ihrem Besitzer. rng injiziert = deterministisch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { armyOf, defenseOf, startAttack, resolveBattle, conquerIsland } from '../src/engine/war.js';
+import { armyOf, defenseOf, declareWar, cancelDeclaration, resolveWars } from '../src/engine/war.js';
 import { canPlace } from '../src/engine/map.js';
 
 const registry = {
@@ -11,88 +10,104 @@ const registry = {
     ['watchtower', { id: 'watchtower', meta: { military: { defense: 15 } } }],
     ['hut', { id: 'hut' }],
   ]),
+  resources: new Map([
+    ['soldiers', { id: 'soldiers', category: 'special' }],
+    ['wood', { id: 'wood', category: 'raw' }],
+    ['meat', { id: 'meat', category: 'food' }],
+  ]),
 };
 
-function mkPlayer(id, islandId, over = {}) {
+function mkPlayer(id, over = {}) {
   return {
-    id, kind: 'ai', name: `P${id}`, islandId, active: true,
+    id, kind: 'ai', name: `P${id}`, islandId: id, active: true,
     resources: {}, instances: [], buildings: {}, population: 0,
-    roads: new Set(), cleared: new Set(), placed: {}, nextInstanceId: 1,
-    region: { x: islandId * 20, y: 0, w: 10, h: 10 },
     ...over,
   };
 }
-const mkWorld = () => ({
-  islands: [
-    { id: 0, x: 0, y: 0, w: 10, h: 10 }, { id: 1, x: 20, y: 0, w: 10, h: 10 },
-  ],
-  ships: [], nextShipId: 1,
-});
 
 test('Stärken: Armee = Soldaten; Verteidigung = Soldaten + Türme + Miliz', () => {
-  const p = mkPlayer(1, 1, {
+  const p = mkPlayer(1, {
     resources: { soldiers: 12 }, population: 100,
-    instances: [{ id: 1, buildingId: 'watchtower', x: 21, y: 1, counted: true }, { id: 2, buildingId: 'hut', x: 22, y: 1, counted: true }],
+    instances: [{ id: 1, buildingId: 'watchtower', x: 1, y: 1, counted: true }],
   });
   assert.equal(armyOf(p), 12);
-  assert.equal(defenseOf(p, registry), 12 + 15 + 5); // 5 % Miliz von 100
+  assert.equal(defenseOf(p, registry), 12 + 15 + 5);
 });
 
-test('startAttack: Treuhand + Kriegsschiff; Validierungen greifen', () => {
-  const world = mkWorld();
-  const a = mkPlayer(0, 0, { resources: { soldiers: 20 }, instances: [{ id: 1, buildingId: 'harbor', x: 1, y: 1, counted: true }] });
-  const d = mkPlayer(1, 1);
-  const ship = startAttack(world, a, d, 15, 100);
+test('Kriegserklärung: Treuhand, keine Doppel-Erklärung, Rückzug erstattet', () => {
+  const world = {};
+  const a = mkPlayer(0, { resources: { soldiers: 20 } });
+  const d = mkPlayer(1);
+  const decl = declareWar(world, a, d, 15);
   assert.equal(a.resources.soldiers, 5);
-  assert.equal(ship.type, 'war');
-  assert.equal(ship.cargo.amount, 15);
-  assert.ok(ship.arriveTick > 100);
-  assert.throws(() => startAttack(world, a, d, 99, 100), /Nur 5 Soldaten/);
-  assert.throws(() => startAttack(world, mkPlayer(2, 0, { resources: { soldiers: 5 } }), d, 1, 100), /Hafen/);
+  assert.equal(decl.soldiers, 15);
+  assert.throws(() => declareWar(world, a, d, 5), /bereits/);
+  assert.throws(() => declareWar(world, a, mkPlayer(2), 99), /Nur 5 Soldaten/);
+  cancelDeclaration(world, a, 1);
+  assert.equal(a.resources.soldiers, 20);
+  assert.equal(world.warDeclarations.length, 0);
 });
 
-test('Schlacht: Sieg erobert die Insel (Territorium, Gebäude, halbe Bevölkerung)', () => {
-  const world = mkWorld();
-  const a = mkPlayer(0, 0, { resources: { soldiers: 0 } });
-  const d = mkPlayer(1, 1, {
-    population: 40, resources: { soldiers: 2 },
-    instances: [{ id: 7, buildingId: 'hut', x: 21, y: 1, counted: true, rot: 0 }],
-    buildings: { hut: { count: 1, workers: 0 } },
-    roads: new Set(['21,2']),
+test('Nacht-Auflösung: Sieger plündert Beute — die Insel bleibt beim Verlierer', () => {
+  const world = {};
+  const a = mkPlayer(0, { kind: 'human', resources: { soldiers: 40 } });
+  const d = mkPlayer(1, {
+    population: 40, resources: { soldiers: 2, wood: 400, meat: 100 },
+    instances: [{ id: 7, buildingId: 'hut', x: 1, y: 1, counted: true }],
   });
-  const ship = { type: 'war', owner: 0, toOwner: 1, cargo: { resourceId: 'soldiers', amount: 30 } };
-  const r = resolveBattle(world, [a, d], ship, registry, () => 0.5); // rng fest → atk 30 > def (2+2)
-  assert.equal(r.victory, true);
-  assert.ok(a.resources.soldiers >= 1, 'Überlebende garnisonieren');
-  assert.equal(d.active, false);
-  assert.equal(d.instances.length, 0);
-  assert.equal(a.instances.length, 1, 'Gebäude übernommen');
-  assert.equal(a.buildings.hut.count, 1);
-  assert.equal(a.population, 20, 'halbe Bevölkerung übernommen');
-  assert.ok(a.regions.some((x) => x.x === 20), 'Territorium erweitert');
-  assert.ok(a.roads.has('21,2'), 'Straßen übernommen');
+  declareWar(world, a, d, 40);
+  const reports = resolveWars(world, [a, d], registry, () => 0.5);
+  assert.match(reports[0], /plündert/);
+  // Beute: max 25 % je Vorrat, Tragkraft der Überlebenden
+  assert.ok(a.resources.wood > 0 && a.resources.wood <= 100, 'Holz-Beute ≤ 25 %');
+  assert.ok(d.resources.wood >= 300, 'Verlierer behält den Großteil');
+  // KEINE Eroberung: Insel, Gebäude, Aktiv-Status bleiben beim Verlierer
+  assert.equal(d.active, true);
+  assert.equal(d.instances.length, 1);
+  assert.equal(d.islandId, 1);
+  // Überlebende kehren heim
+  assert.ok(armyOf(a) > 0 && armyOf(a) <= 40);
 });
 
-test('Schlacht: Niederlage — Angreifer verliert Truppe, Verteidiger Soldaten anteilig', () => {
-  const world = mkWorld();
-  const a = mkPlayer(0, 0, { resources: { soldiers: 0 } });
-  const d = mkPlayer(1, 1, { resources: { soldiers: 50 }, population: 200 });
-  const ship = { type: 'war', owner: 0, toOwner: 1, cargo: { resourceId: 'soldiers', amount: 5 } };
-  const r = resolveBattle(world, [a, d], ship, registry, () => 0.5);
-  assert.equal(r.victory, false);
-  assert.equal(a.resources.soldiers, 0, 'Angreifer-Truppe gefallen');
-  assert.ok(d.resources.soldiers < 50 && d.resources.soldiers > 30, 'Verteidiger verliert anteilig');
+test('Nacht-Auflösung: Abwehr — Angreifer blutet, Verteidiger hält stand', () => {
+  const world = {};
+  const a = mkPlayer(0, { kind: 'human', resources: { soldiers: 5 } });
+  const d = mkPlayer(1, { resources: { soldiers: 60, wood: 100 }, population: 200 });
+  declareWar(world, a, d, 5);
+  const reports = resolveWars(world, [a, d], registry, () => 0.5);
+  assert.match(reports[0], /wehrt den Raubzug/);
+  assert.ok(armyOf(a) < 5, 'Angreifer hat Verluste');
+  assert.equal(a.resources.wood ?? 0, 0, 'keine Beute bei Abwehr');
   assert.equal(d.active, true);
 });
 
-test('canPlace respektiert mehrere Regionen (eroberte Insel wird baubar)', () => {
-  // 40 breite Welt, zwei 10er-Inseln bei x=0 und x=20, alles Gras
+test('Vergeltung: angegriffene KI erklärt Gegenschlag für die nächste Nacht', () => {
+  const world = {};
+  const a = mkPlayer(0, { kind: 'human', resources: { soldiers: 10 } });
+  const d = mkPlayer(1, { kind: 'ai', resources: { soldiers: 30 }, population: 100 });
+  declareWar(world, a, d, 10);
+  const reports = resolveWars(world, [a, d], registry, () => 0.5);
+  assert.ok(reports.some((r) => r.includes('Vergeltung')), 'Vergeltung angekündigt');
+  assert.equal(world.warDeclarations.length, 1);
+  const ret = world.warDeclarations[0];
+  assert.equal(ret.attackerId, 1);
+  assert.equal(ret.defenderId, 0);
+  assert.equal(ret.retaliation, true);
+  // Vergeltungs-Truppe ist abgestellt (Treuhand)
+  assert.ok(armyOf(d) < 30);
+  // Nächste Nacht: Vergeltung schlägt gegen den Menschen zu (Mensch vergilt NICHT automatisch)
+  const r2 = resolveWars(world, [a, d], registry, () => 0.5);
+  assert.equal(r2.length >= 1, true);
+  assert.equal(world.warDeclarations.length, 0, 'keine Endlos-Fehde: Mensch vergilt nicht automatisch');
+});
+
+test('canPlace respektiert mehrere Regionen (generisches Territorium-Feature)', () => {
   const map = { width: 40, height: 10, tiles: 'G'.repeat(400), legend: { G: 'grass' } };
   const def = { id: 'hut', placement: { terrain: ['grass'], size: { w: 1, h: 1 } } };
   const reg = { buildings: new Map([['hut', def]]) };
   const state = { instances: [], roads: new Set(), cleared: new Set(), placed: {}, region: { x: 0, y: 0, w: 10, h: 10 } };
-  assert.equal(canPlace(map, state, reg, def, 25, 5).ok, false, 'fremde Insel gesperrt');
+  assert.equal(canPlace(map, state, reg, def, 25, 5).ok, false);
   state.regions = [state.region, { x: 20, y: 0, w: 10, h: 10 }];
-  assert.equal(canPlace(map, state, reg, def, 25, 5).ok, true, 'erobert → baubar');
-  assert.equal(canPlace(map, state, reg, def, 15, 5).ok, false, 'Ozean-Lücke bleibt gesperrt');
+  assert.equal(canPlace(map, state, reg, def, 25, 5).ok, true);
+  assert.equal(canPlace(map, state, reg, def, 15, 5).ok, false);
 });

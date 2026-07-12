@@ -15,7 +15,7 @@ import { logEvent } from '../engine/state.js';
 import { savePlayer, newPlayerOnIsland, saveWorld } from '../engine/players.js';
 import { planTurn } from '../ai/strategist.js';
 import { createShipment, findHarbor } from '../engine/ships.js';
-import { startAttack, armyOf, defenseOf } from '../engine/war.js';
+import { declareWar, cancelDeclaration, resolveWars, armyOf, defenseOf, logWar } from '../engine/war.js';
 import { createOffer, acceptOffer, cancelOffer } from '../engine/trade.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
@@ -252,25 +252,21 @@ export default async function gameRoutes(fastify) {
   // Liste aller Spieler + Inseln + Render-Instanzen aller Inseln (für die Weltansicht)
   fastify.get('/api/players', async () => {
     const { registry } = ctx.registryHolder;
-    // Erobertes Territorium zählt nicht als freier KI-Platz (Stufe 6)
-    const claimed = new Set();
-    for (const p of ctx.players) {
-      if (p.active === false) continue;
-      claimed.add(p.islandId);
-      for (const r of p.regions || []) {
-        const isl = (ctx.world?.islands || []).find((i) => i.x === r.x && i.y === r.y);
-        if (isl) claimed.add(isl.id);
-      }
-    }
+    const nameOf = (id) => ctx.players.find((x) => x.id === id)?.name || '?';
     return {
       islands: ctx.world?.islands || [],
       maxAi: 4,
       tick: ctx.human?.tick ?? 0,
-      freeSlots: (ctx.world?.islands || []).filter((isl) => !claimed.has(isl.id)).map((isl) => isl.id),
+      freeSlots: (ctx.world?.islands || []).filter((isl) => !ctx.players.some((p) => p.islandId === isl.id && p.active !== false)).map((isl) => isl.id),
       warLog: (ctx.world?.warLog || []).slice(-6).reverse(),
+      // Öffentliche Kriegserklärungen (Schlacht in der kommenden Nacht)
+      warDeclarations: (ctx.world?.warDeclarations || []).map((d) => ({
+        attacker: nameOf(d.attackerId), attackerId: d.attackerId,
+        defender: nameOf(d.defenderId), defenderId: d.defenderId,
+        soldiers: d.soldiers, retaliation: !!d.retaliation,
+      })),
       players: ctx.players.map((p) => ({
         id: p.id, kind: p.kind, name: p.name, islandId: p.islandId, active: p.active !== false,
-        defeated: p.defeated ? { by: ctx.players.find((x) => x.id === p.defeated.by)?.name || '?' } : null,
         population: Math.round(p.population), epoch: currentEpoch(registry, p)?.name?.de || null,
         buildings: (p.instances || []).filter((i) => i.counted).length,
         harbor: !!findHarbor(p),
@@ -301,19 +297,45 @@ export default async function gameRoutes(fastify) {
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
   });
 
-  // Angriff auf eine Nachbarinsel (Stufe 6) — vom menschlichen Spieler
+  // Kriegserklärung (Stufe 6 v2): tagsüber erklären, die Schlacht schlägt sich
+  // im nächtlichen KI-Lauf (fair gegenüber der Tageszug-KI). Kein Erobern —
+  // der Sieger plündert nur Beute, jede Insel bleibt bei ihrem Besitzer.
   fastify.post('/api/attack', async (req, reply) => {
     const { targetIsland, soldiers } = req.body || {};
     try {
       const target = ctx.players.find((p) => p.islandId === Number(targetIsland) && p.active !== false);
       if (!target) throw new Error('Zielinsel hat keinen aktiven Bewohner');
       if (target.kind === 'human') throw new Error('Du kannst dich nicht selbst angreifen');
-      const ship = startAttack(ctx.world, ctx.human, target, soldiers, ctx.human?.tick ?? 0);
+      const decl = declareWar(ctx.world, ctx.human, target, soldiers);
       await savePlayer(ctx.pool, ctx.human);
       await saveWorld(ctx.pool, ctx.world);
-      logEvent(ctx.pool, 'attack_sent', { target: target.id, soldiers: ship.cargo.amount }).catch(() => {});
-      return { ok: true, arriveTick: ship.arriveTick, soldiers: ship.cargo.amount };
+      logEvent(ctx.pool, 'war_declared', { target: target.id, soldiers: decl.soldiers }).catch(() => {});
+      return { ok: true, soldiers: decl.soldiers };
     } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
+  });
+
+  // Kriegserklärung zurückziehen (vor der nächtlichen Schlacht)
+  fastify.post('/api/attack/cancel', async (req, reply) => {
+    try {
+      const decl = cancelDeclaration(ctx.world, ctx.human, req.body?.targetPlayer);
+      await savePlayer(ctx.pool, ctx.human);
+      await saveWorld(ctx.pool, ctx.world);
+      return { ok: true, soldiers: decl.soldiers };
+    } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
+  });
+
+  // Nächtliche Kriegs-Auflösung — token-geschützt, ruft der ai-worker im
+  // Tagesrhythmus auf (zusammen mit Content-Generierung und KI-Planung).
+  fastify.post('/api/war/resolve', async (req, reply) => {
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const tok = req.headers['x-ai-token'] || req.body?.token || bearer;
+    if (!ctx.config.aiImportToken || tok !== ctx.config.aiImportToken) { reply.code(401); return { ok: false, error: 'nicht autorisiert' }; }
+    const reports = resolveWars(ctx.world, ctx.players, ctx.registryHolder.registry);
+    for (const r of reports) logWar(ctx.world, r, ctx.human?.tick ?? 0);
+    for (const p of ctx.players) await savePlayer(ctx.pool, p);
+    await saveWorld(ctx.pool, ctx.world);
+    for (const r of reports) fastify.log.info(`Krieg: ${r}`);
+    return { ok: true, battles: reports.length, reports };
   });
 
   // ── Handelsmarkt (Stufe 5) ──

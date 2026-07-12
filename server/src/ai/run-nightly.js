@@ -62,6 +62,14 @@ export async function runNightly(log = console) {
     log.warn?.(`[nightly] KI-Planung übersprungen: ${err.message}`);
   }
 
+  // Kriegssystem (Stufe 6): erklärte Schlachten im Tagesrhythmus auflösen
+  try {
+    const war = await api('POST', '/api/war/resolve', {});
+    if (war?.battles) log.info?.(`[nightly] ${war.battles} Kriegs-Ereignis(se): ${war.reports?.join(' | ')}`);
+  } catch (err) {
+    log.warn?.(`[nightly] Kriegs-Auflösung übersprungen: ${err.message}`);
+  }
+
   // Online-Modus (Multiplayer M1): Insel nächtlich veröffentlichen — nur wenn
   // der Spieler verbunden ist und der Freigabe zugestimmt hat (sonst 400).
   try {

@@ -33,7 +33,7 @@ function playerFromRow(row, world) {
 }
 
 export async function loadWorld(pool) {
-  const res = await pool.query('SELECT seed, width, height, tiles, islands, version, ships, offers, warlog FROM world WHERE id = 1');
+  const res = await pool.query('SELECT seed, width, height, tiles, islands, version, ships, offers, warlog, wardecls FROM world WHERE id = 1');
   if (res.rowCount === 0) return null;
   const r = res.rows[0];
   const ships = r.ships || [];
@@ -44,18 +44,19 @@ export async function loadWorld(pool) {
     ships, nextShipId: ships.reduce((m, s) => Math.max(m, s.id + 1), 1),
     offers, nextOfferId: offers.reduce((m, o) => Math.max(m, o.id + 1), 1),
     warLog: r.warlog || [],
+    warDeclarations: r.wardecls || [],
   };
 }
 
 export async function saveWorld(pool, world) {
   await pool.query(
-    `INSERT INTO world (id, seed, width, height, tiles, islands, version, ships, offers, warlog)
-     VALUES (1,$1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO world (id, seed, width, height, tiles, islands, version, ships, offers, warlog, wardecls)
+     VALUES (1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (id) DO UPDATE SET
        seed=EXCLUDED.seed, width=EXCLUDED.width, height=EXCLUDED.height,
        tiles=EXCLUDED.tiles, islands=EXCLUDED.islands, version=EXCLUDED.version,
-       ships=EXCLUDED.ships, offers=EXCLUDED.offers, warlog=EXCLUDED.warlog`,
-    [world.seed, world.width, world.height, world.tiles, JSON.stringify(world.islands || []), world.version || 0, JSON.stringify(world.ships || []), JSON.stringify(world.offers || []), JSON.stringify(world.warLog || [])]
+       ships=EXCLUDED.ships, offers=EXCLUDED.offers, warlog=EXCLUDED.warlog, wardecls=EXCLUDED.wardecls`,
+    [world.seed, world.width, world.height, world.tiles, JSON.stringify(world.islands || []), world.version || 0, JSON.stringify(world.ships || []), JSON.stringify(world.offers || []), JSON.stringify(world.warLog || []), JSON.stringify(world.warDeclarations || [])]
   );
 }
 
