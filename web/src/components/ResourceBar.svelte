@@ -3,6 +3,15 @@
   export let resourceIndex;
   export let compact = false; // Mobile: schlanker, horizontal scrollbar, Tap statt Hover
 
+  // Desktop: bis auf EINE Zeile einklappbar (horizontal scrollbar) — die
+  // Werkzeugleiste darunter verschiebt sich automatisch mit (gemessene Höhe).
+  let collapsed = false;
+  try { collapsed = localStorage.getItem('resbarCollapsed') === '1'; } catch {}
+  function toggleCollapsed() {
+    collapsed = !collapsed;
+    try { localStorage.setItem('resbarCollapsed', collapsed ? '1' : '0'); } catch {}
+  }
+
   const fmt = (n) => (Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(n % 1 === 0 ? 0 : 1));
   const fmtRate = (n) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}`;
 
@@ -20,11 +29,18 @@
   }
 </script>
 
-<div class="{compact ? 'px-2 py-1 rounded-b-lg border-x' : 'px-4 py-2'} bg-stone-950/90 backdrop-blur border-b border-stone-800">
-  <!-- Desktop: mehrzeilig umbrechend (übersichtlich) — Werkzeugleiste & Panels
-       positionieren sich dynamisch UNTER der gemessenen Leisten-Höhe.
-       Mobile (compact): eine Zeile mit horizontalem Scrollen (zwischen den FABs). -->
-  <div class="flex items-center {compact ? 'flex-nowrap overflow-x-auto gap-x-3 text-xs' : 'flex-wrap gap-x-5 gap-y-1 text-sm'}">
+<div class="relative {compact ? 'px-2 py-1 rounded-b-lg border-x' : 'px-4 py-2'} bg-stone-950/90 backdrop-blur border-b border-stone-800">
+  <!-- Desktop: mehrzeilig umbrechend (übersichtlich) ODER eingeklappt auf eine
+       Scroll-Zeile — Werkzeugleiste & Panels weichen der gemessenen Höhe aus.
+       Mobile (compact): immer eine Zeile mit horizontalem Scrollen (zwischen den FABs). -->
+  {#if !compact}
+    <button
+      class="absolute right-1.5 top-1.5 z-10 w-5 h-5 grid place-items-center rounded text-[10px] text-stone-500 hover:text-stone-200 hover:bg-stone-800"
+      on:click={toggleCollapsed}
+      title={collapsed ? 'Materialleiste ausklappen (alle Zeilen)' : 'Materialleiste auf eine Zeile einklappen'}
+    >{collapsed ? '▼' : '▲'}</button>
+  {/if}
+  <div class="flex items-center {compact ? 'flex-nowrap overflow-x-auto gap-x-3 text-xs' : collapsed ? 'flex-nowrap overflow-x-auto gap-x-5 text-sm pr-7' : 'flex-wrap gap-x-5 gap-y-1 text-sm pr-7'}">
     <span class="flex items-center gap-1 shrink-0 {state.popTrend === 'shrinking' ? 'text-red-400' : ''}" title={state.popReason || 'Bevölkerung / Wohnraum'}>
       <span>👥</span>
       <span class="font-mono">{Math.floor(state.population)}/{state.housing}</span>
