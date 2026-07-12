@@ -81,9 +81,11 @@
     ? [...players.players].sort((a, b) => (b.population - a.population) || (b.buildings - a.buildings))
     : [];
   // Alle Instanzen (Mensch detailliert aus state + KI-Inseln aus /api/players) für die Weltansicht
+  // Fremde (KI-)Instanzen werden mit Besitzer markiert → InfoPanel zeigt sie nur an,
+  // ohne Steuerung (Arbeiter/Drehen/Abriss wirken nur auf die eigene Insel).
   $: allInstances = [
     ...((state?.instances) || []),
-    ...(((players?.players) || []).filter((p) => p.id !== 0).flatMap((p) => p.instances || [])),
+    ...(((players?.players) || []).filter((p) => p.id !== 0).flatMap((p) => (p.instances || []).map((i) => ({ ...i, _owner: p.name })))),
   ];
   let roadMode = false; // Straßen-Malmodus
   let decoType = null; // 'tree' | 'rock' im Deko-Malmodus
@@ -254,7 +256,8 @@
 
     <!-- Obere HUD-Leiste (über der Werkzeugleiste, damit die Ressourcen-Tooltips
          nicht von den Buttons überlagert werden) -->
-    <div class="absolute top-0 inset-x-0 z-40 safe-top">
+    <!-- Mobile: Leiste zwischen 🏗️ (links) und ☰ (rechts) einpassen statt darunter -->
+    <div class="absolute top-0 z-40 safe-top {$isMobile ? 'left-[52px] right-[52px]' : 'inset-x-0'}">
       <ResourceBar {state} {resourceIndex} compact={$isMobile} />
     </div>
 

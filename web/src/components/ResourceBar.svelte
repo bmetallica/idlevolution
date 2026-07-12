@@ -20,7 +20,7 @@
   }
 </script>
 
-<div class="{compact ? 'px-2 py-1' : 'px-4 py-2'} bg-stone-950/90 backdrop-blur border-b border-stone-800">
+<div class="{compact ? 'px-2 py-1 rounded-b-lg border-x' : 'px-4 py-2'} bg-stone-950/90 backdrop-blur border-b border-stone-800">
   <div class="flex items-center gap-y-1 {compact ? 'flex-nowrap overflow-x-auto gap-x-3 text-xs' : 'flex-wrap gap-x-5 text-sm'}">
     <span class="flex items-center gap-1 {state.popTrend === 'shrinking' ? 'text-red-400' : ''}" title={state.popReason || 'Bevölkerung / Wohnraum'}>
       <span>👥</span>

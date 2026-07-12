@@ -33,6 +33,7 @@
   const resName = (rid) => (rid === '*' ? 'alle' : resourceIndex[rid]?.name?.de || rid);
 
   $: inst = selection?.instance;
+  $: foreign = !!inst?._owner; // Gebäude eines (KI-)Nachbarn → nur ansehen, nicht steuern
   $: def = inst ? defIndex[inst.buildingId] : null;
   $: neigh = inst && def?.production ? chainNeighbors(inst, def, instances, defIndex) : { suppliers: [], customers: [] };
   $: inputRids = def?.production ? Object.keys(def.production.inputs || {}) : [];
@@ -83,6 +84,11 @@
 
     <div class="p-3 space-y-2 text-xs">
       {#if def}
+        {#if foreign}
+          <div class="rounded bg-sky-950/60 border border-sky-800/70 px-2 py-1 text-sky-200">
+            🤖 Gehört <b>{inst._owner}</b> — Nachbarinseln kannst du nur ansehen.
+          </div>
+        {/if}
         {#if def.description?.de}<p class="text-stone-400">{def.description.de}</p>{/if}
         {#if !inst.done}
           <p class="text-amber-400">🏗️ Im Bau — noch {inst.ticksLeft} Ticks</p>
@@ -100,8 +106,8 @@
           </div>
         {/if}
 
-        <!-- Produktionskette -->
-        {#if def.production && inst.done}
+        <!-- Produktionskette (nur eigene Gebäude — Ketten-/Mangeldaten sind Spielerdaten) -->
+        {#if def.production && inst.done && !foreign}
           {#if missingInputs.length}
             <div class="rounded bg-red-950/70 border border-red-800 px-2 py-1 text-red-200">
               ⚠️ Rohstoff-Mangel: {missingInputs.map((r) => resName(r)).join(', ')} — Produktion steht.
@@ -129,7 +135,7 @@
           {/if}
         {/if}
         <!-- Arbeiter-Zuweisung (gilt für alle Gebäude dieses Typs) -->
-        {#if inst.done && def.workers}
+        {#if inst.done && def.workers && !foreign}
           <div class="flex items-center gap-2">
             <span class="text-stone-500">👷 Arbeiter:</span>
             <button class="w-5 h-5 grid place-items-center rounded bg-stone-800 hover:bg-stone-700 disabled:opacity-40" on:click={() => doWorkers(-1)} disabled={(bstate?.workers ?? 0) <= 0}>−</button>
@@ -149,6 +155,7 @@
           </div>
         {/if}
         <div class="text-stone-600">Position: {inst.x}, {inst.y} · Ausrichtung {(inst.rot ?? 0) * 90}°</div>
+        {#if !foreign}
         <div class="flex gap-2 mt-2">
           <button
             class="flex-1 text-xs bg-stone-800 hover:bg-stone-700 border border-stone-600 rounded px-2 py-1.5 text-stone-100"
@@ -164,6 +171,7 @@
             🔨 Abreißen
           </button>
         </div>
+        {/if}
       {:else}
         <p class="text-stone-400">Leeres Feld · {TERRAIN_LABEL[selection.terrain] || selection.terrain}</p>
         <p class="text-stone-600">
