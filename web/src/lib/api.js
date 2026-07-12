@@ -83,6 +83,12 @@ export const onlineSync = () => post('/api/online/sync');
 export const onlineNeighbors = () => fetch('/api/online/neighbors').then(json);
 export const onlineIsland = (owner) => fetch(`/api/online/island/${encodeURIComponent(owner)}`).then(json);
 export const onlineAdopt = (owner) => post('/api/online/adopt', { owner });
+export const onlinePreview = () => fetch('/api/online/preview').then(json);
+export const onlineUnpublish = () => post('/api/online/unpublish');
+export const onlineTrade = () => fetch('/api/online/trade').then(json);
+export const onlineTradeOffer = (giveRes, giveAmt, wantRes, wantAmt) => post('/api/online/trade/offer', { giveRes, giveAmt, wantRes, wantAmt });
+export const onlineTradeCancel = (offerId) => post('/api/online/trade/cancel', { offerId });
+export const onlineTradeAccept = (offerOwner, offerId) => post('/api/online/trade/accept', { offerOwner, offerId });
 
 export const disablePack = (packId) =>
   fetch('/api/pack/disable', {

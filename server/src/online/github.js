@@ -74,3 +74,38 @@ export async function publishFiles(token, user, centralRepo, files) {
     throw e;
   }
 }
+
+/**
+ * „Offline gehen" (M5): entfernt die eigenen Dateien per PR aus dem zentralen
+ * Repo. Gleiche Mechanik wie publishFiles, nur mit Lösch-Commits.
+ */
+export async function unpublishFiles(token, user, centralRepo, paths) {
+  const [cOwner, cName] = centralRepo.split('/');
+  const own = user === cOwner;
+  const writeRepo = own ? centralRepo : `${user}/${cName}`;
+  const branch = `island-${user.toLowerCase()}`;
+
+  if (!own) await gh(token, 'POST', `/repos/${writeRepo}/merge-upstream`, { branch: 'main' }).catch(() => {});
+  const baseSha = (await gh(token, 'GET', `/repos/${writeRepo}/git/ref/heads/main`)).object.sha;
+  try {
+    await gh(token, 'POST', `/repos/${writeRepo}/git/refs`, { ref: `refs/heads/${branch}`, sha: baseSha });
+  } catch {
+    await gh(token, 'PATCH', `/repos/${writeRepo}/git/refs/heads/${branch}`, { sha: baseSha, force: true });
+  }
+
+  let deleted = 0;
+  for (const p of paths) {
+    const cur = await gh(token, 'GET', `/repos/${writeRepo}/contents/${p}?ref=${branch}`).catch(() => null);
+    if (!cur?.sha) continue; // existiert nicht (mehr)
+    await gh(token, 'DELETE', `/repos/${writeRepo}/contents/${p}`, { message: `Offline gegangen: ${user}`, sha: cur.sha, branch });
+    deleted += 1;
+  }
+  if (!deleted) return { prUrl: null, deleted };
+
+  const head = own ? branch : `${user}:${branch}`;
+  const pr = await gh(token, 'POST', `/repos/${centralRepo}/pulls`, {
+    title: `Offline: ${user}`, head, base: 'main',
+    body: 'Spieler hat die Online-Freigabe beendet — eigene Daten werden entfernt.',
+  }).catch(async () => (await gh(token, 'GET', `/repos/${centralRepo}/pulls?state=open&head=${own ? cOwner : user}:${branch}`))?.[0]);
+  return { prUrl: pr?.html_url || null, deleted };
+}

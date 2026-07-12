@@ -115,6 +115,38 @@ function sanitizeEpoch(e) {
   return { id: e.id, name: name(e.name) || { de: e.id }, order: int(e.order, 0, 100) ?? 0 };
 }
 
+// ── Handel (M3): offers.json / accepts.json der Nachbarn säubern ──
+const OFFER_ID_RE = /^[a-z0-9-]{3,80}$/;
+function sanitizeStake(s) {
+  if (!isObj(s) || typeof s.resourceId !== 'string' || !ID_RE.test(s.resourceId)) return null;
+  const amount = int(s.amount, 1, 1000000);
+  return amount === undefined ? null : { resourceId: s.resourceId, amount };
+}
+export function sanitizeOffers(d, expectedOwner) {
+  if (!isObj(d) || d.owner !== expectedOwner) throw new Error(`offers.json: owner ≠ ${expectedOwner}`);
+  const offers = [], closed = [];
+  for (const o of Array.isArray(d.offers) ? d.offers.slice(0, 20) : []) {
+    if (!isObj(o) || typeof o.id !== 'string' || !OFFER_ID_RE.test(o.id)) continue;
+    const give = sanitizeStake(o.give), want = sanitizeStake(o.want);
+    if (give && want) offers.push({ id: o.id, give, want, createdAt: cap(o.createdAt, 30) || '' });
+  }
+  for (const c of Array.isArray(d.closed) ? d.closed.slice(0, 100) : []) {
+    if (!isObj(c) || typeof c.id !== 'string' || !OFFER_ID_RE.test(c.id)) continue;
+    closed.push({ id: c.id, winner: checkOwner(c.winner) ? c.winner : null, at: cap(c.at, 30) || '' });
+  }
+  return { version: 1, owner: d.owner, offers, closed };
+}
+export function sanitizeAccepts(d, expectedOwner) {
+  if (!isObj(d) || d.owner !== expectedOwner) throw new Error(`accepts.json: owner ≠ ${expectedOwner}`);
+  const accepts = [];
+  for (const a of Array.isArray(d.accepts) ? d.accepts.slice(0, 50) : []) {
+    if (!isObj(a) || typeof a.offerId !== 'string' || !OFFER_ID_RE.test(a.offerId) || !checkOwner(a.offerOwner)) continue;
+    const give = sanitizeStake(a.give), want = sanitizeStake(a.want);
+    if (give && want) accepts.push({ offerId: a.offerId, offerOwner: a.offerOwner, give, want, acceptedAt: cap(a.acceptedAt, 30) || '' });
+  }
+  return { version: 1, owner: d.owner, accepts };
+}
+
 /** packs.json säubern — liefert nur render-relevante, gekappte Definitionen. */
 export function sanitizePacks(d, expectedOwner) {
   if (!isObj(d)) throw new Error('packs.json: kein Objekt');

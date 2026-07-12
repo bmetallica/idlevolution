@@ -3,9 +3,11 @@
 
 import { startDeviceFlow, pollToken, fetchGithubUser, loadOnline, saveOnline } from '../online/auth.js';
 import { buildIslandExport, buildPacksExport } from '../online/exporter.js';
-import { publishFiles } from '../online/github.js';
-import { syncOnline, listNeighbors, loadNeighbor } from '../online/sync.js';
+import { publishFiles, unpublishFiles } from '../online/github.js';
+import { syncOnline, listNeighbors, loadNeighbor, loadNeighborTrade } from '../online/sync.js';
 import { adoptPack } from '../online/adopt.js';
+import { emptyTrade, createOnlineOffer, cancelOnlineOffer, acceptOnlineOffer, settleTrades } from '../online/trade.js';
+import { savePlayer } from '../engine/players.js';
 
 export const DISCLAIMER_VERSION = 1;
 
@@ -76,6 +78,7 @@ export default async function onlineRoutes(fastify) {
       username: s.username || null,
       avatarUrl: s.avatarUrl || null,
       disclaimerAccepted: (s.disclaimerVersion || 0) >= DISCLAIMER_VERSION,
+      publishEnabled: s.publishEnabled !== false,
       pending: p?.userCode ? { userCode: p.userCode, verificationUri: p.verificationUri } : null,
       error: p?.error || null,
       repo: ctx.config.online.repo,
@@ -83,35 +86,74 @@ export default async function onlineRoutes(fastify) {
     };
   });
 
-  // Insel veröffentlichen (M1): Export → Fork/Branch → PR; Action merged automatisch
-  let publishing = false;
-  fastify.post('/api/online/publish', async (req, reply) => {
+  // ── Veröffentlichen (M1+M3): Insel, Packs UND Handelsdateien als ein PR ──
+  const canPublish = () => {
     const s = ctx.online.settings;
-    if (!s.token) { reply.code(400); return { ok: false, error: 'Nicht mit GitHub verbunden' }; }
-    if ((s.disclaimerVersion || 0) < DISCLAIMER_VERSION) { reply.code(400); return { ok: false, error: 'Freigabe (Disclaimer) fehlt' }; }
-    if (publishing) { reply.code(409); return { ok: false, error: 'Veröffentlichung läuft bereits' }; }
+    if (!s.token) throw new Error('Nicht mit GitHub verbunden');
+    if ((s.disclaimerVersion || 0) < DISCLAIMER_VERSION) throw new Error('Freigabe (Disclaimer) fehlt');
+    if (s.publishEnabled === false) throw new Error('Online-Freigabe ist beendet („Offline gegangen")');
+    return s;
+  };
+  let publishing = false;
+  async function doPublish() {
+    const s = canPublish();
+    if (publishing) throw new Error('Veröffentlichung läuft bereits');
     publishing = true;
     try {
       const island = buildIslandExport(ctx, s.username);
       const packs = buildPacksExport(ctx, s.username);
+      const trade = s.trade || emptyTrade();
       const files = [
         { path: `islands/${s.username}/island.json`, content: JSON.stringify(island, null, 1) + '\n' },
         { path: `islands/${s.username}/packs.json`, content: JSON.stringify(packs, null, 1) + '\n' },
+        { path: `islands/${s.username}/offers.json`, content: JSON.stringify({ version: 1, owner: s.username, offers: trade.offers || [], closed: trade.closed || [] }, null, 1) + '\n' },
+        { path: `islands/${s.username}/accepts.json`, content: JSON.stringify({ version: 1, owner: s.username, accepts: trade.accepts || [] }, null, 1) + '\n' },
       ];
       for (const f of files) {
         if (Buffer.byteLength(f.content) > 512 * 1024) throw new Error(`${f.path} überschreitet 512 KB`);
       }
       const { prUrl } = await publishFiles(s.token, s.username, ctx.config.online.repo, files);
-      ctx.online.settings = { ...s, lastPublish: { at: new Date().toISOString(), prUrl, instances: island.instances.length } };
+      ctx.online.settings = { ...ctx.online.settings, lastPublish: { at: new Date().toISOString(), prUrl, instances: island.instances.length } };
       await saveOnline(ctx.pool, ctx.online.settings);
-      fastify.log.info(`Online-Modus: Insel veröffentlicht (${island.instances.length} Gebäude) → ${prUrl}`);
-      return { ok: true, prUrl, instances: island.instances.length };
-    } catch (err) {
-      reply.code(502);
-      return { ok: false, error: err.message };
+      fastify.log.info(`Online-Modus: veröffentlicht (${island.instances.length} Gebäude, ${trade.offers?.length || 0} Angebote) → ${prUrl}`);
+      return { prUrl, instances: island.instances.length };
     } finally {
       publishing = false;
     }
+  }
+  fastify.post('/api/online/publish', async (req, reply) => {
+    try { return { ok: true, ...(await doPublish()) }; }
+    catch (err) { reply.code(err.message.includes('bereits') ? 409 : 400); return { ok: false, error: err.message }; }
+  });
+
+  // Vorschau „Was wird veröffentlicht?" (M5) — vor der ersten Freigabe
+  fastify.get('/api/online/preview', async (req, reply) => {
+    const s = ctx.online.settings;
+    if (!s.username) { reply.code(400); return { ok: false, error: 'Nicht verbunden' }; }
+    try {
+      const island = buildIslandExport(ctx, s.username);
+      const packs = buildPacksExport(ctx, s.username);
+      return {
+        ok: true, username: s.username,
+        mapSize: `${island.map.width}×${island.map.height}`,
+        instances: island.instances.length, roads: island.roads.length,
+        packBuildings: packs.buildings.length, packResources: packs.resources.length,
+      };
+    } catch (err) { reply.code(500); return { ok: false, error: err.message }; }
+  });
+
+  // „Offline gehen" (M5): eigene Dateien per PR entfernen, Nightly-Publish stoppen
+  fastify.post('/api/online/unpublish', async (req, reply) => {
+    const s = ctx.online.settings;
+    if (!s.token) { reply.code(400); return { ok: false, error: 'Nicht mit GitHub verbunden' }; }
+    try {
+      const paths = ['island.json', 'packs.json', 'offers.json', 'accepts.json'].map((f) => `islands/${s.username}/${f}`);
+      const r = await unpublishFiles(s.token, s.username, ctx.config.online.repo, paths);
+      ctx.online.settings = { ...ctx.online.settings, publishEnabled: false, lastPublish: null };
+      await saveOnline(ctx.pool, ctx.online.settings);
+      fastify.log.info(`Online-Modus: offline gegangen (${r.deleted} Datei(en) entfernt)`);
+      return { ok: true, ...r };
+    } catch (err) { reply.code(502); return { ok: false, error: err.message }; }
   });
 
   // Disclaimer-Zustimmung („Insel online freigeben — auf eigene Gefahr")
@@ -120,27 +162,106 @@ export default async function onlineRoutes(fastify) {
       ...ctx.online.settings,
       disclaimerVersion: DISCLAIMER_VERSION,
       disclaimerAcceptedAt: new Date().toISOString(),
+      publishEnabled: true, // „Offline gehen" setzt das wieder zurück
     };
     await saveOnline(ctx.pool, ctx.online.settings);
     return { ok: true };
   });
 
-  // Nachbarn synchronisieren (M2) — tokenlos, geht auch OHNE GitHub-Verbindung
+  // Nachbarn synchronisieren (M2) — tokenlos, geht auch OHNE GitHub-Verbindung.
+  // Danach Handels-Abwicklung (M3): Accepts/Tombstones der Nachbarn auflösen.
   let syncing = false;
   fastify.post('/api/online/sync', async (req, reply) => {
     if (syncing) { reply.code(409); return { ok: false, error: 'Sync läuft bereits' }; }
     syncing = true;
     try {
       const r = await syncOnline(ctx, fastify.log);
+      let tradeEvents = [];
+      const s = ctx.online.settings;
+      if (s.username && s.trade) {
+        tradeEvents = settleTrades(s.trade, ctx.human, s.username, await loadNeighborTrade(ctx));
+        if (tradeEvents.length) {
+          await savePlayer(ctx.pool, ctx.human);
+          for (const e of tradeEvents) fastify.log.info(`Online-Handel: ${e}`);
+          // Abschluss-Tombstones sofort publizieren, damit die Gegenseite auflösen kann
+          doPublish().catch((err) => fastify.log.warn(`Online-Handel: Publish nach Abwicklung fehlgeschlagen: ${err.message}`));
+        }
+      }
       ctx.online.settings = { ...ctx.online.settings, lastSyncAt: r.syncedAt };
       await saveOnline(ctx.pool, ctx.online.settings);
-      return { ok: true, ...r };
+      return { ok: true, ...r, tradeEvents };
     } catch (err) {
       reply.code(502);
       return { ok: false, error: err.message };
     } finally {
       syncing = false;
     }
+  });
+
+  // ── Online-Handel (M3) ──
+  const tradeState = () => (ctx.online.settings.trade ??= emptyTrade());
+  const persistTrade = async () => {
+    await savePlayer(ctx.pool, ctx.human);
+    await saveOnline(ctx.pool, ctx.online.settings);
+    doPublish().catch((err) => fastify.log.warn(`Online-Handel: Publish fehlgeschlagen: ${err.message}`));
+  };
+
+  // Übersicht: fremde offene Angebote + eigener Handelszustand
+  fastify.get('/api/online/trade', async () => {
+    const s = ctx.online.settings;
+    const registry = ctx.registryHolder.registry;
+    const neighborTrade = await loadNeighborTrade(ctx);
+    const marketOffers = [];
+    for (const [owner, d] of Object.entries(neighborTrade)) {
+      for (const o of d.offers?.offers || []) {
+        marketOffers.push({
+          owner, ...o,
+          giveKnown: registry.resources.has(o.give.resourceId),
+          wantKnown: registry.resources.has(o.want.resourceId),
+          accepted: (s.trade?.accepts || []).some((a) => a.offerId === o.id),
+        });
+      }
+    }
+    return {
+      connected: !!s.token, username: s.username || null,
+      offers: s.trade?.offers || [], closed: (s.trade?.closed || []).slice(-5),
+      accepts: s.trade?.accepts || [], marketOffers,
+    };
+  });
+
+  fastify.post('/api/online/trade/offer', async (req, reply) => {
+    try {
+      const s = canPublish();
+      const { giveRes, giveAmt, wantRes, wantAmt } = req.body || {};
+      const offer = createOnlineOffer(tradeState(), ctx.human, s.username, { resourceId: giveRes, amount: giveAmt }, { resourceId: wantRes, amount: wantAmt });
+      await persistTrade();
+      return { ok: true, offer };
+    } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
+  });
+
+  fastify.post('/api/online/trade/cancel', async (req, reply) => {
+    try {
+      canPublish();
+      const offer = cancelOnlineOffer(tradeState(), ctx.human, req.body?.offerId);
+      await persistTrade();
+      return { ok: true, offer };
+    } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
+  });
+
+  fastify.post('/api/online/trade/accept', async (req, reply) => {
+    try {
+      const s = canPublish();
+      const { offerOwner, offerId } = req.body || {};
+      const neighborTrade = await loadNeighborTrade(ctx);
+      const offer = (neighborTrade[offerOwner]?.offers?.offers || []).find((o) => o.id === offerId);
+      if (!offer) throw new Error('Angebot nicht (mehr) verfügbar — erst 🔄 aktualisieren');
+      if (!ctx.registryHolder.registry.resources.has(offer.give.resourceId)) {
+        throw new Error('Unbekannte Ware — übernimm zuerst die Inhalte dieses Nachbarn (✨ beim Besuchen)');
+      }
+      const accept = acceptOnlineOffer(tradeState(), ctx.human, s.username, offerOwner, offer);
+      await persistTrade();
+      return { ok: true, accept };
+    } catch (err) { reply.code(400); return { ok: false, error: err.message }; }
   });
 
   // Liste der synchronisierten Online-Nachbarn (lokale Kopien)

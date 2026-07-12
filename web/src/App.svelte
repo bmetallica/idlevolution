@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt } from './lib/api.js';
+  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt, onlineTrade, onlineTradeOffer, onlineTradeCancel, onlineTradeAccept } from './lib/api.js';
   import { buildChainIndex, computeShortages, computeBottlenecks } from './lib/chains.js';
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
@@ -89,11 +89,41 @@
     try { await disableAi(id); await loadPlayers(); } catch (e) { showFlash(e.message, false); }
     aiBusy = false;
   }
-  // Handelsmarkt (Stufe 5)
+  // Handelsmarkt (Stufe 5) + Online-Handel (Multiplayer M3)
   let showMarket = false;
   let market = null;
+  let oTrade = null; // /api/online/trade: eigene Angebote/Accepts + fremde Angebote
   let offGive = '', offGiveAmt = 50, offWant = '', offWantAmt = 50;
-  async function loadMarket() { try { market = await fetchMarket(); } catch {} }
+  async function loadMarket() {
+    try { market = await fetchMarket(); } catch {}
+    try { oTrade = await onlineTrade(); } catch {}
+  }
+  // ⚖ Fairness aus Sicht des Annehmers: Wert(bekomme) / Wert(zahle) nach baseValue
+  function fairness(o) {
+    const gv = resourceIndex[o.give.resourceId]?.baseValue, wv = resourceIndex[o.want.resourceId]?.baseValue;
+    if (!gv || !wv) return null;
+    const ratio = (gv * o.give.amount) / (wv * o.want.amount);
+    return ratio >= 1.15 ? { icon: '🟢', label: 'günstig' } : ratio <= 0.85 ? { icon: '🔴', label: 'teuer' } : { icon: '⚖️', label: 'fair' };
+  }
+  async function submitOnlineOffer() {
+    if (!offGive || !offWant || offGive === offWant || aiBusy) return;
+    aiBusy = true;
+    try { const r = await onlineTradeOffer(offGive, offGiveAmt, offWant, offWantAmt); if (!r.ok) throw new Error(r.error); showFlash('🌐 Online-Angebot eingestellt — wird veröffentlicht'); await loadMarket(); await pollState(); }
+    catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  async function takeOnlineOffer(owner, id) {
+    aiBusy = true;
+    try { const r = await onlineTradeAccept(owner, id); if (!r.ok) throw new Error(r.error); showFlash('🌐 Angenommen — die Gegenseite bucht beim nächsten Sync'); await loadMarket(); await pollState(); }
+    catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
+  async function dropOnlineOffer(id) {
+    aiBusy = true;
+    try { const r = await onlineTradeCancel(id); if (!r.ok) throw new Error(r.error); showFlash('Online-Angebot zurückgezogen'); await loadMarket(); await pollState(); }
+    catch (e) { showFlash(e.message, false); }
+    aiBusy = false;
+  }
   async function submitOffer() {
     if (!offGive || !offWant || offGive === offWant || aiBusy) return;
     aiBusy = true;
@@ -575,7 +605,56 @@
                   {#each (content?.resources || []) as r}<option value={r.id}>{r.icon || ''} {r.name?.de || r.id}</option>{/each}
                 </select>
                 <button class="rounded bg-amber-700 hover:bg-amber-600 disabled:opacity-40 px-2 text-white text-sm" on:click={submitOffer} disabled={aiBusy || !offGive || !offWant}>+</button>
+                {#if oTrade?.connected}
+                  <button class="rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-2 text-white text-sm" on:click={submitOnlineOffer} disabled={aiBusy || !offGive || !offWant} title="Als ONLINE-Angebot für andere Spieler veröffentlichen">🌐</button>
+                {/if}
               </div>
+            </div>
+          {/if}
+
+          <!-- Online-Handel (Multiplayer M3) -->
+          {#if oTrade && (oTrade.marketOffers.length || oTrade.offers.length || oTrade.accepts.length)}
+            <div class="mt-2.5 pt-2 border-t border-stone-800">
+              <div class="text-[11px] text-sky-300 mb-1">🌐 Online-Angebote <span class="text-stone-600">(Abwicklung beim nächsten Sync)</span></div>
+              {#each oTrade.marketOffers as o (o.owner + o.id)}
+                {@const g = resourceIndex[o.give.resourceId]}
+                {@const w = resourceIndex[o.want.resourceId]}
+                {@const fair = fairness(o)}
+                <div class="rounded border border-sky-900/70 bg-stone-800/60 px-2 py-1.5 text-sm mb-1.5">
+                  <div class="flex items-center gap-1 flex-wrap">
+                    <span class="text-emerald-300">{g?.icon || '❓'} {o.give.amount} {g?.name?.de || o.give.resourceId}</span>
+                    <span class="text-stone-500">→</span>
+                    <span class="text-amber-300">{w?.icon || '❓'} {o.want.amount} {w?.name?.de || o.want.resourceId}</span>
+                    {#if fair}<span class="text-[10px] text-stone-400 ml-1" title="Einschätzung nach Warenwert (baseValue)">{fair.icon} {fair.label}</span>{/if}
+                  </div>
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="text-[11px] text-stone-500">von 🌐 {o.owner}</span>
+                    {#if o.accepted}
+                      <span class="ml-auto text-[11px] text-sky-400">⏳ angenommen — wartet auf Gegenseite</span>
+                    {:else if !o.giveKnown}
+                      <span class="ml-auto text-[11px] text-stone-500" title="Erst die Inhalte dieses Nachbarn übernehmen (✨ beim Besuchen)">❓ unbekannte Ware</span>
+                    {:else}
+                      <button class="ml-auto text-[11px] rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-2 py-0.5 text-white" on:click={() => takeOnlineOffer(o.owner, o.id)} disabled={aiBusy || !oTrade.connected}>annehmen</button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+              {#each oTrade.offers as o (o.id)}
+                {@const g = resourceIndex[o.give.resourceId]}
+                {@const w = resourceIndex[o.want.resourceId]}
+                <div class="rounded border border-stone-700 bg-stone-800/40 px-2 py-1.5 text-sm mb-1.5">
+                  <div class="flex items-center gap-1 flex-wrap">
+                    <span class="text-emerald-300">{g?.icon || ''} {o.give.amount} {g?.name?.de || o.give.resourceId}</span>
+                    <span class="text-stone-500">→</span>
+                    <span class="text-amber-300">{w?.icon || ''} {o.want.amount} {w?.name?.de || o.want.resourceId}</span>
+                    <span class="text-[10px] text-stone-500 ml-1">dein 🌐-Angebot</span>
+                    <button class="ml-auto text-[11px] text-stone-400 hover:text-red-300" on:click={() => dropOnlineOffer(o.id)} disabled={aiBusy}>zurückziehen</button>
+                  </div>
+                </div>
+              {/each}
+              {#each oTrade.accepts as a (a.offerId)}
+                <p class="text-[11px] text-stone-500 mb-1">⏳ {a.want.amount} {resourceIndex[a.want.resourceId]?.name?.de || a.want.resourceId} an 🌐 {a.offerOwner} gezahlt — Ware kommt mit dem nächsten Sync beider Seiten.</p>
+              {/each}
             </div>
           {/if}
         {:else}

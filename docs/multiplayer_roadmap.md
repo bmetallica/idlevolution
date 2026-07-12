@@ -98,18 +98,31 @@ Konzept, Architektur-Begründungen und Sicherheitsmodell: siehe
 - ✅ Willkommensinsel (`islands/idlevolution-demo/`) als erster Nachbar für
   jeden neuen Online-Spieler (inkl. Beispiel-Pack)
 - ✅ E2E verifiziert (Playwright): Sync → Panel → Besuchen → Render → Banner
-- ⬜ packs.json-Schema auch Action-seitig strikt prüfen (bisher nur JSON+Größe
-  — client-seitig ist die strikte Prüfung aktiv)
+- ✅ packs.json-Schema auch Action-seitig strikt prüfen (mit M3 nachgezogen:
+  Stück-Limits, ID-Regex, Größen-Limit je Definition)
 
-## M3 — Handel — OFFEN
+## M3 — Handel — ERLEDIGT
 
-- ⬜ `offers.json` (eigene Angebote, Treuhand lokal) + `accepts.json`
-  (Handshake) im eigenen Ordner; Schema + Action-Validierung
-- ⬜ Abwicklung beim Sync: Anbieter sieht Accept → bucht Gegenseite, entfernt
-  Angebot; Doppel-Annahme: früherer Timestamp gewinnt, Rest wird erstattet
-- ⬜ UI: „🌐 Online-Angebote" im 🪙-Markt-Panel (neben lokalen KI-Angeboten)
-- ⬜ LLM-Preisberater: bewertet fremde Ressourcen (nur Zahlen/Kategorien,
-  `<untrusted_data>`-Kapselung, Chroniken nie im Prompt)
+- ✅ `online/trade.js`: deterministischer Zwei-Dateien-Handshake —
+  `offers.json` (Angebote + Abschluss-**Tombstones** `closed`) und
+  `accepts.json` (Konditionen eingefroren). Treuhand lokal bei Einstellen
+  und Annehmen; Handels-Aktionen lösen sofort ein Auto-Publish aus
+- ✅ Abwicklung beim Sync (settleTrades, rein & getestet): Anbieter bucht die
+  Bezahlung des **frühesten** Accepts und schreibt den Tombstone; Annehmer
+  löst Tombstones auf (winner=ich → Ware · sonst/storniert → Erstattung);
+  Anbieter verschwunden → Erstattung nach 14 Tagen; Tombstones werden nach
+  14 Tagen ausgedünnt. **6 Unit-Tests** (Treuhand, Doppel-Annahme, Storno,
+  Timeout, keine Doppel-Buchung)
+- ✅ UI: „🌐 Online-Angebote" im 🪙-Markt-Panel — fremde Angebote annehmen,
+  eigene per 🌐-Button einstellen/zurückziehen, ⏳-Status für schwebende
+  Handshakes; unbekannte Waren erst nach ✨-Übernahme annehmbar
+- ✅ Preisberater: **deterministisch** statt LLM (⚖️/🟢/🔴 nach baseValue-
+  Verhältnis) — bewusste Änderung: gleiche Aussagekraft, aber **null**
+  Prompt-Injection-Fläche (fremde Texte erreichen nie ein LLM)
+- ✅ Action-Validierung für offers/accepts/packs (Stück-Limits, ID-Regex,
+  owner-Bindung) — schließt auch den offenen M2-Punkt
+- ✅ Live-Test am echten Repo: Angebot (50 Holz → 20 Stein) → Auto-Publish →
+  Accept der Willkommensinsel → Sync → +20 Stein + Tombstone publiziert
 
 ## M4 — Content-Austausch — ERLEDIGT
 
@@ -127,18 +140,27 @@ Konzept, Architektur-Begründungen und Sicherheitsmodell: siehe
   der Willkommensinsel in der eigenen Registry, eingefrorene Farben intakt;
   52 Server-Tests grün
 
-## M5 — Betrieb & Politur — OFFEN
+## M5 — Betrieb & Politur — ERLEDIGT
 
-- ⬜ Pruning: Inseln > 90 Tage ohne Update aus dem Index
-- ⬜ `blocklist.json` (Moderation durch Repo-Inhaber; Clients ignorieren
-  geblockte Ordner)
-- ⬜ Quoten je Ordner Action-seitig verschärfen
-- ⬜ „Offline gehen": eigene Daten per PR aus dem Repo entfernen
-- ⬜ „Was wird veröffentlicht?"-Vorschau vor dem ersten Upload
-- ⬜ Doku in beiden READMEs
+- ✅ Pruning: Inseln > 90 Tage ohne Update fallen aus dem Index (Dateien
+  bleiben; der nächste Upload bringt sie zurück)
+- ✅ `blocklist.json` (Moderation durch Repo-Inhaber) — wirkt im Index-Builder
+  UND client-seitig beim Sync (Verteidigung in der Tiefe)
+- ✅ Quoten Action-seitig: 512 KB/Datei, 2 MB/Ordner, Stück-Limits je Dateityp
+- ✅ „🚪 Offline gehen": eigene Dateien per Lösch-PR entfernt, nächtliche
+  Veröffentlichung gestoppt (publishEnabled); erneute Freigabe über den
+  Disclaimer-Dialog. Lösch-PRs werden von der Action akzeptiert
+- ✅ „Was wird veröffentlicht?"-Vorschau im Disclaimer-Dialog (Karte, Gebäude,
+  Straßen, KI-Baupläne, GitHub-Name)
+- ✅ Doku: README des Spiels (Online-Kapitel) + README des Online-Repos
+  (Regeln, Handel, Moderation, Pruning)
 
 ---
 
-*Stand: 2026-07-12 (M0, M1, M2, M4 erledigt — offen: M3 Handel, M5 Betrieb,
-Cross-Account-Test, Action-seitige packs.json-Schemaprüfung). Dieses Dokument
-wird mit jedem Meilenstein fortgeschrieben.*
+*Stand: 2026-07-12 — **ALLE Meilensteine (M0–M5) umgesetzt und live
+verifiziert.** Einziger offener Punkt: der Cross-Account-Test des Fork-Pfads
+(braucht einen zweiten GitHub-Account; der Owner-Pfad ist vollständig
+verifiziert, der Fork-Pfad implementiert). Der komplette Handels-Loop wurde
+live am echten Repo durchgespielt: Angebot → Auto-Publish → Accept →
+Sync-Abwicklung (+20 Stein) → Tombstone. Ebenso „Offline gehen" (Lösch-PR,
+Index-Entfernung) und erneute Freigabe.*

@@ -66,8 +66,10 @@ Asynchroner Multiplayer **ohne eigenen Server** — GitHub ist Speicher, Login u
 - **Insel veröffentlichen**: Die eigene Insel (Karte, Gebäude, Straßen) und die **eigenen LLM-generierten Inhalte** werden als Pull Request hochgeladen — IDs global genamespaced (`gh-<user>--…`), Sprite-Farben eingefroren. Eine GitHub Action prüft jeden PR (Pfad-Schutz, Schema, Limits) und merged automatisch. Läuft nach der ersten Freigabe nächtlich mit.
 - **Nachbarn besuchen**: Fremde Inseln werden tokenlos synchronisiert, streng validiert, isoliert abgelegt und lassen sich read-only besuchen — inklusive der fremden, prozedural gezeichneten LLM-Gebäude in Originaloptik.
 - **✨ Inhalte übernehmen**: Die LLM-Baupläne eines Nachbarn lassen sich per Klick ins eigene Spiel importieren — sie werden ein normales, in der 🤖-Zentrale deaktivierbares Content-Pack. So wandern KI-Erfindungen von Welt zu Welt.
+- **🌐 Online-Handel**: Angebote im 🪙-Markt für andere Spieler veröffentlichen und fremde annehmen (⚖️ Fairness-Einschätzung nach Warenwert). Abwicklung asynchron über einen Treuhand-Handshake beim nächsten Sync beider Seiten — Doppel-Annahmen und Stornos werden sauber erstattet.
+- **🚪 Offline gehen**: entfernt die eigenen Daten jederzeit per Pull Request aus dem Community-Repo.
 
-Konzept: [`docs/roadmap-multiplayer.md`](docs/roadmap-multiplayer.md) · Fortschritt: [`docs/multiplayer_roadmap.md`](docs/multiplayer_roadmap.md) (Handel und Betrieb folgen).
+Konzept: [`docs/roadmap-multiplayer.md`](docs/roadmap-multiplayer.md) · Fortschritt: [`docs/multiplayer_roadmap.md`](docs/multiplayer_roadmap.md).
 
 ---
 
