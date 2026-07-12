@@ -135,6 +135,17 @@ export function epochsInOrder(registry) {
   return [...registry.epochs.values()].sort((a, b) => a.order - b.order);
 }
 
+/**
+ * Anzeigename eines Content-Items für LLM-Prompts. Items aus übernommenen
+ * ONLINE-Packs (fremde Spieler!) liefern nur ihre ID — deren Freitexte
+ * erreichen so nie einen Prompt (Prompt-Injection-Schutz). Im UI werden die
+ * Namen weiterhin normal angezeigt (dort nur als Text gerendert, harmlos).
+ */
+export function llmSafeName(item) {
+  if (typeof item?._pack === 'string' && item._pack.startsWith('online-')) return item.id;
+  return item?.name?.de || item?.id || '';
+}
+
 /** Tiefe Kopie der Registry (für Sandbox-Simulationen des Importers). */
 export function cloneRegistry(registry) {
   const clone = emptyRegistry();

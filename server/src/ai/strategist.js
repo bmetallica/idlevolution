@@ -5,13 +5,15 @@
 
 import { chatCompletion } from './generator.js';
 import { currentEpoch, computeNetRates, totalHousing, buildingUnlockStatus } from '../engine/tick.js';
-import { epochsInOrder } from '../content/loader.js';
+import { epochsInOrder, llmSafeName } from '../content/loader.js';
 import { describeConditions } from '../engine/rules.js';
 
 const clamp = (v, lo, hi, d) => (Number.isFinite(Number(v)) ? Math.max(lo, Math.min(hi, Number(v))) : d);
 
+import { armyOf, defenseOf } from '../engine/war.js';
+
 /** Kompakter Insel-Zustand + Handlungsoptionen für den LLM-Strategen. */
-function snapshot(registry, player, game) {
+function snapshot(registry, player, game, world) {
   const rates = computeNetRates(registry, player, game);
   const epoch = currentEpoch(registry, player);
   const nextEpoch = epoch ? epochsInOrder(registry).find((e) => e.order === epoch.order + 1) : null;
@@ -21,7 +23,7 @@ function snapshot(registry, player, game) {
 
   const gebaeude = Object.entries(player.buildings)
     .filter(([, b]) => b.count > 0)
-    .map(([id, b]) => ({ id, name: registry.buildings.get(id)?.name?.de || id, anzahl: b.count }));
+    .map(([id, b]) => ({ id, name: llmSafeName(registry.buildings.get(id)) || id, anzahl: b.count }));
 
   const ressourcen = [...registry.resources.values()]
     .map((r) => ({ id: r.id, menge: Math.round((player.resources[r.id] || 0) * 10) / 10, proTick: Math.round((rates[r.id] || 0) * 100) / 100 }))
@@ -31,11 +33,17 @@ function snapshot(registry, player, game) {
   const verfuegbareGebaeude = [...registry.buildings.values()]
     .filter((d) => buildingUnlockStatus(registry, player, d).ok)
     .map((d) => ({
-      id: d.id, name: d.name?.de || d.id, kategorie: d.category,
+      id: d.id, name: llmSafeName(d), kategorie: d.category,
       kosten: d.cost || {}, arbeiter: d.workers || 0,
       produziert: d.production?.outputs || {}, verbraucht: d.production?.inputs || {},
       wohnraum: d.housing?.capacity || 0,
     }));
+
+  // Militär-Lage (Stufe 6): eigene Stärke + öffentliche Kriegserklärungen
+  // gegen diese Insel — der Plan kann dann Kasernen/Wehranlagen priorisieren.
+  const bedrohungen = (world?.warDeclarations || [])
+    .filter((d) => d.defenderId === player.id)
+    .map((d) => ({ soldaten: d.soldiers, vergeltung: !!d.retaliation }));
 
   return {
     bevoelkerung: workforce, wohnraum: housing,
@@ -44,6 +52,7 @@ function snapshot(registry, player, game) {
     epoche: epoch?.name?.de,
     stufenbeduerfnisse: epoch?.needs || {},
     naechsteEpoche: nextEpoch ? { name: nextEpoch.name?.de, bedingungen: describeConditions(nextEpoch && epoch?.advance, registry, player) } : null,
+    militaer: { armee: armyOf(player), verteidigung: defenseOf(player, registry), angriffeHeuteNacht: bedrohungen },
     gebaeude, ressourcen, verfuegbareGebaeude,
   };
 }
@@ -56,6 +65,7 @@ Regeln:
 - Reihenfolge = Priorität. Sichere zuerst Nahrung und Baumaterial (Holz/Stein), decke dann die aktuellen stufenbeduerfnisse, dann baue gezielt Richtung naechsteEpoche (deren bedingungen) und sinnvolle Produktionsketten.
 - Baue kein Gebäude, dessen "verbraucht"-Güter du nicht selbst produzierst — plane die Vorkette (z.B. erst Erz-Mine, dann Hütte, dann Verarbeiter).
 - "anzahl" klein halten (1–8 je Eintrag), insgesamt max 15 Einträge.
+- MILITÄR: "militaer" zeigt Armee/Verteidigung und angriffeHeuteNacht (angekündigte Raubzüge gegen dich). Bei Bedrohung oder starken Nachbarn: Kaserne/Wehranlagen im Bauplan priorisieren.
 - politik.nahrungsPuffer 0..1 (Sicherheitsmarge Nahrung), aggression 0..1 (für spätere Konflikte).`;
 
 function parsePlan(raw, registry) {
@@ -82,8 +92,8 @@ function parsePlan(raw, registry) {
 }
 
 /** Erstellt (oder aktualisiert) den Plan eines KI-Spielers via LLM. Wirft bei Fehler. */
-export async function planTurn(registry, player, game, llm) {
-  const data = snapshot(registry, player, game);
+export async function planTurn(registry, player, game, llm, world) {
+  const data = snapshot(registry, player, game, world);
   const messages = [
     { role: 'system', content: SYSTEM },
     { role: 'user', content: `Insel-Zustand (JSON):\n${JSON.stringify(data)}\n\nErstelle den Bauplan als JSON.` },

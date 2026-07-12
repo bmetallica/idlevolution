@@ -3,7 +3,7 @@
 
 import { computeNetRates, storageCapacity, totalHousing, currentEpoch } from '../engine/tick.js';
 import { describeConditions } from '../engine/rules.js';
-import { epochsInOrder } from '../content/loader.js';
+import { epochsInOrder, llmSafeName } from '../content/loader.js';
 
 export async function buildExport(ctx) {
   const { registry } = ctx.registryHolder;
@@ -19,7 +19,7 @@ export async function buildExport(ctx) {
 
   const resources = [...registry.resources.values()].map((r) => ({
     id: r.id,
-    name: r.name.de,
+    name: llmSafeName(r),
     category: r.category,
     epoch: r.epoch,
     baseValue: r.baseValue,
@@ -32,7 +32,7 @@ export async function buildExport(ctx) {
 
   const buildings = [...registry.buildings.values()].map((b) => ({
     id: b.id,
-    name: b.name.de,
+    name: llmSafeName(b),
     category: b.category,
     epoch: b.epoch,
     count: state.buildings[b.id]?.count ?? 0,
@@ -66,8 +66,10 @@ export async function buildExport(ctx) {
     );
   }
 
-  // Feedback-Schleife: Ablehnungen der letzten Läufe, damit die KI daraus lernt
+  // Feedback-Schleife: Ablehnungen der letzten Läufe, damit die KI daraus lernt.
+  // Kompakt (nur Gründe als Strings) — volle JSON-Blobs verschwenden Tokens.
   let recentRejections = [];
+  let recentClamps = [];
   try {
     const { rows } = await pool.query(
       "SELECT started_at, status, rejected, error FROM ai_runs WHERE status IN ('rejected','partial','error') ORDER BY id DESC LIMIT 5"
@@ -75,9 +77,15 @@ export async function buildExport(ctx) {
     recentRejections = rows.map((r) => ({
       at: r.started_at,
       status: r.status,
-      rejected: r.rejected,
-      error: r.error,
+      reasons: (Array.isArray(r.rejected) ? r.rejected : []).map((x) => x?.reason || String(x)).slice(0, 8),
+      ...(r.error ? { error: String(r.error).slice(0, 200) } : {}),
     }));
+    // Clamp-Notizen akzeptierter Läufe: sagen dem Modell, WO seine Zahlen-
+    // intuition daneben lag (z.B. "baseValue 5000 → 1000 gekappt").
+    const acc = await pool.query(
+      "SELECT accepted FROM ai_runs WHERE status IN ('accepted','partial') AND accepted IS NOT NULL ORDER BY id DESC LIMIT 3"
+    );
+    recentClamps = acc.rows.flatMap((r) => r.accepted?.notes || []).slice(0, 10);
   } catch {
     // DB nicht erreichbar → Export funktioniert trotzdem
   }
@@ -117,5 +125,6 @@ export async function buildExport(ctx) {
     buildings,
     gaps,
     recentRejections,
+    recentClamps,
   };
 }

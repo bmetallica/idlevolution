@@ -1,0 +1,25 @@
+# CI: Server-Tests + Web-Build auf jedem Push/PR — fängt Regressionen vor dem Deploy.
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Server-Tests
+        working-directory: server
+        run: |
+          npm ci
+          npm test
+      - name: Web-Build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build

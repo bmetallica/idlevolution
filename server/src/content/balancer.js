@@ -114,6 +114,14 @@ export function balancePack(pack, registry, balance) {
       if (c !== v) notes.push(`Gebäude '${b.id}': storage.${rid} → ${c}`);
       b.storage[rid] = c;
     }
+    // Wehranlagen (Kriegssystem): defense an die Epoche koppeln, damit die KI
+    // keine übermächtige Festung in die Steinzeit stellt.
+    if (b.meta?.military?.defense != null) {
+      const maxDef = (balance.maxDefensePerEpochOrder ?? 15) * (epochOrderOf(b.epoch) + 1);
+      const d = clamp(Math.round(b.meta.military.defense) || 1, 1, maxDef);
+      if (d !== b.meta.military.defense) notes.push(`Gebäude '${b.id}': military.defense → ${d}`);
+      b.meta.military.defense = d;
+    }
 
     const costValue = valueOf(b.cost, lookupValue);
     if (costValue <= 0) {

@@ -213,15 +213,38 @@ produziert`, `JSON-Parse-Fehler an Position 2768`. Daraus folgt:
 
 ---
 
-## Empfohlene Reihenfolge (Quick Wins zuerst)
+## Roadmap
 
-| # | Punkt | Warum zuerst |
-|---|-------|--------------|
-| 1 | Reparatur-Runde + Verbotsliste am Prompt-Anfang (1.) | halbiert den LLM-Ausschuss, 2 kleine Änderungen |
-| 2 | Soldaten vom Handel ausschließen (3.) | Balance-Leck, 10 Zeilen |
-| 3 | Injection-Pfad Online-Texte → LLM (2.) | Sicherheits-Lücke, klein |
-| 4 | GitHub-Token verschlüsseln (5.) | Sicherheits-Lücke, klein |
-| 5 | `.env.example` + CI + README-Zahlen (7.) | Außenwirkung fürs Repo |
-| 6 | Export-Token-Diät + Clamp-Feedback (1.) | LLM-Qualität langfristig |
-| 7 | saveWorld-Dirty-Flag + Transaktion (4.) | Robustheit/IO |
-| 8 | Strategist/Advisor-Kontext Krieg & Handel (2.) | rundet die neuen Features ab |
+**Phase 1 — LLM-Ausschuss halbieren** *(Kapitel 1)*
+- [x] Verbotsliste (existierende IDs) kompakt an den Anfang des User-Prompts
+- [x] Reparatur-Runde: abgelehntes Pack + Fehlerliste einmal ans LLM zurück
+- [x] `extractJSON` robuster (trailing commas, Steuerzeichen)
+- [x] ID-Pattern in die LLM-Grammatik (Format-Kaskade fängt Inkompatibilität)
+- [x] Export-Token-Diät (kompaktes JSON) + Clamp-Notizen in die Feedback-Schleife
+- [x] Militär-Wissen in Prompt/Schema + Balance-Grenze für `defense`
+
+**Phase 2 — Sicherheit & Balance** *(Kapitel 2+3+5)*
+- [x] Soldaten (`special`) vom Handel ausschließen (KI, Markt, Verschiffen, Online)
+- [x] Injection-Pfad schließen: Online-Pack-Texte erreichen keine LLM-Prompts
+- [x] GitHub-Token at-rest verschlüsseln (AES-GCM, Schlüssel aus AI_IMPORT_TOKEN)
+- [x] Wehrturm ohne Arbeiter; Raubzug-Mindesttruppe
+- [x] Kriegs-Fallback beim Boot (Erklärungen > 36 h auflösen)
+
+**Phase 3 — Repo-Außenwirkung** *(Kapitel 7)*
+- [x] `.env.example` vervollständigen (ONLINE_*)
+- [x] CI-Workflow (Tests + Web-Build auf Push)
+- [x] README-Zahlen/Verweise aktualisieren
+
+**Phase 4 — Engine-Robustheit** *(Kapitel 4)*
+- [x] saveWorld nur bei Änderung (Dirty-Signatur)
+- [x] Persist-Zyklus als Transaktion (Spieler + Welt atomar)
+
+**Phase 5 — LLM-Kontext & UX-Feinschliff** *(Kapitel 2+6)*
+- [x] Strategist-Snapshot: Armee/Verteidigung/Bedrohungen; Plan-Fehler loggen
+- [x] Advisor-Snapshot: Militär/Schiffe/Markt + Regeln im System-Prompt
+- [x] Advisor mit kleinem Token-/Zeitbudget
+- [ ] EpochBanner-Ersatz auf Mobile; Polling bündeln *(separat, nach Bedarf)*
+
+**Später/optional:** Zwei-Phasen-Generierung, LLM-Warteschlange mit Priorität,
+Offline-Aufholung in Blöcken, Onboarding, PNG-Icons, Cross-Account-Test
+(blockiert durch zweiten Account), `aggression` aktivieren (User-Entscheid).

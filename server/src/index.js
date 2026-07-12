@@ -12,6 +12,7 @@ import { growIslandRegion } from './engine/world.js';
 import { runExecutor } from './ai/executor.js';
 import { tickShips } from './engine/ships.js';
 import { aiConsiderTrade, aiPostOffer } from './engine/trade.js';
+import { resolveWars, logWar } from './engine/war.js';
 import gameRoutes from './routes/game.js';
 import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
@@ -51,6 +52,17 @@ for (const p of players) {
   }
 }
 
+// Kriegs-Fallback: Erklärungen, deren Nacht nie kam (ai-worker down, Server
+// lange aus), nach 36 h beim Boot auflösen — sonst bleiben Treuhand-Soldaten
+// unbegrenzt gebunden.
+const staleDecl = (world.warDeclarations || []).some((d) => Date.now() - new Date(d.declaredAt || 0).getTime() > 36 * 3600 * 1000);
+if (staleDecl) {
+  const reports = resolveWars(world, players, registryHolder.registry);
+  for (const r of reports) { logWar(world, r, human.tick); log.info(`Krieg (Boot-Nachholung): ${r}`); }
+  for (const p of players) await savePlayer(pool, p);
+  await saveWorld(pool, world);
+}
+
 // ── App-Kontext für alle Routen ── (ctx.state = menschlicher Spieler; abwärtskompatibel)
 const ctx = { config, pool, registryHolder, world, players, human, state: human, game, balance };
 fastify.decorate('gameCtx', ctx);
@@ -67,6 +79,33 @@ await fastify.register(fastifyStatic, { root: publicDir, prefix: '/' });
 
 // ── Tick-Loop (über alle aktiven Spieler) ──
 let tickCounter = 0;
+let lastWorldSig = ''; // Welt nur bei echter Änderung schreiben (83 KB tiles!)
+const worldSig = () =>
+  `${world.version}|${world.ships?.length}|${world.nextShipId}|${world.offers?.length}|${world.nextOfferId}|${world.warLog?.length}|${world.warDeclarations?.length}`;
+// Persist-Zyklus atomar: Spieler + Welt in EINER Transaktion — ein Crash
+// mittendrin hinterlässt sonst inkonsistente Stände (z.B. Fracht doppelt).
+async function persistAll() {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const p of players) {
+      if (p.active === false) continue;
+      p.lastTickAt = Date.now();
+      await savePlayer(client, p);
+    }
+    const sig = worldSig();
+    if (sig !== lastWorldSig) {
+      await saveWorld(client, world);
+      lastWorldSig = sig;
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
 const interval = setInterval(async () => {
   try {
     for (const p of players) {
@@ -101,12 +140,7 @@ const interval = setInterval(async () => {
     for (const s of delivered) logEvent(pool, 'ship_arrived', { from: s.owner, to: s.toOwner, cargo: s.cargo }).catch(() => {});
     tickCounter += 1;
     if (delivered.length || tickCounter % config.persistEveryTicks === 0) {
-      for (const p of players) {
-        if (p.active === false) continue;
-        p.lastTickAt = Date.now();
-        await savePlayer(pool, p);
-      }
-      await saveWorld(pool, world);
+      await persistAll();
     }
   } catch (err) {
     log.error(`Tick fehlgeschlagen: ${err.message}`);

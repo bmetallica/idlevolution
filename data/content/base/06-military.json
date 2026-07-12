@@ -83,7 +83,7 @@
         "wood": 20
       },
       "buildTimeTicks": 20,
-      "workers": 1,
+      "workers": 0,
       "placement": {
         "terrain": [
           "grass",

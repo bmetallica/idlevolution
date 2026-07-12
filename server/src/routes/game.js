@@ -238,13 +238,15 @@ export default async function gameRoutes(fastify) {
   async function planFor(p) {
     if (p.kind !== 'ai' || p.active === false) return false;
     try {
-      const plan = await planTurn(ctx.registryHolder.registry, p, ctx.game, ctx.config.llm);
+      const plan = await planTurn(ctx.registryHolder.registry, p, ctx.game, ctx.config.llm, ctx.world);
       p.plan = plan;
       await savePlayer(ctx.pool, p);
       logEvent(ctx.pool, 'ai_plan', { id: p.id, name: p.name, strategy: plan.strategy, queue: plan.buildQueue.length, chronicle: plan.chronicle }).catch(() => {});
       return true;
     } catch (err) {
-      ctx.registryHolder.log?.warn?.(`KI-Plan für ${p.name} fehlgeschlagen: ${err.message}`);
+      // Sichtbar machen (Log + Audit) — sonst plant die KI still mit dem alten Plan weiter
+      fastify.log.warn(`KI-Plan für ${p.name} fehlgeschlagen: ${err.message}`);
+      logEvent(ctx.pool, 'ai_plan_failed', { id: p.id, name: p.name, error: String(err.message).slice(0, 200) }).catch(() => {});
       return false;
     }
   }
@@ -289,6 +291,7 @@ export default async function gameRoutes(fastify) {
   fastify.post('/api/ship', async (req, reply) => {
     const { toIsland, resourceId, amount } = req.body || {};
     try {
+      if (ctx.registryHolder.registry.resources.get(resourceId)?.category === 'special') throw new Error('Militärgüter reisen nur per Kriegserklärung');
       const ship = createShipment(ctx.world, ctx.players, ctx.human, Number(toIsland), resourceId, Number(amount), ctx.human?.tick ?? 0);
       await savePlayer(ctx.pool, ctx.human);
       await saveWorld(ctx.pool, ctx.world);
@@ -345,9 +348,13 @@ export default async function gameRoutes(fastify) {
       ...o, ownerName: ctx.players.find((p) => p.id === o.owner)?.name || '?', mine: o.owner === ctx.human?.id,
     })),
   }));
+  // Soldaten & Co. (category special) sind keine Handels-/Frachtware
+  const isSpecial = (rid) => ctx.registryHolder.registry.resources.get(rid)?.category === 'special';
+
   fastify.post('/api/market/offer', async (req, reply) => {
     const { giveRes, giveAmt, wantRes, wantAmt } = req.body || {};
     try {
+      if (isSpecial(giveRes) || isSpecial(wantRes)) throw new Error('Militärgüter sind nicht handelbar');
       const o = createOffer(ctx.world, ctx.human, { resourceId: giveRes, amount: giveAmt }, { resourceId: wantRes, amount: wantAmt }, ctx.human?.tick ?? 0);
       await savePlayer(ctx.pool, ctx.human); await saveWorld(ctx.pool, ctx.world);
       return { ok: true, offerId: o.id };

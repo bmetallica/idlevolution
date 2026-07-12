@@ -3,7 +3,7 @@
 // die Token-geschützte HTTP-API (dort passieren Validierung, Balancing, Hot-Reload).
 
 import { config } from '../config.js';
-import { generatePack } from './generator.js';
+import { generatePack, repairPack } from './generator.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -49,10 +49,27 @@ export async function runNightly(log = console) {
     throw err;
   }
 
-  const result = await api('POST', '/api/ai/import', {
+  let result = await api('POST', '/api/ai/import', {
     pack: generated.pack,
     run: { export: exportData, rawResponse: generated.raw, model: config.llm.model },
   });
+
+  // Reparatur-Runde: Bei kompletter Ablehnung bekommt das LLM die konkreten
+  // Fehler EINMAL zurück — konkrete Fehler korrigieren rettet die Nacht.
+  if (result.status === 'rejected' && Array.isArray(result.rejected) && result.rejected.length) {
+    const reasons = result.rejected.map((r) => r.reason || String(r)).slice(0, 12);
+    log.info?.(`[nightly] Pack abgelehnt (${reasons.length} Gründe) → Reparatur-Runde…`);
+    try {
+      const fixed = await repairPack(exportData, config.llm, balance, generated.raw, reasons);
+      result = await api('POST', '/api/ai/import', {
+        pack: fixed.pack,
+        run: { export: exportData, rawResponse: fixed.raw, model: config.llm.model, repaired: true },
+      });
+      log.info?.(`[nightly] Reparatur-Ergebnis: ${result.status}`);
+    } catch (err) {
+      log.warn?.(`[nightly] Reparatur-Runde fehlgeschlagen: ${err.message}`);
+    }
+  }
 
   // Nach der Content-Generierung: KI-Spieler ihre Tagesstrategie neu planen lassen (Stufe 2)
   try {

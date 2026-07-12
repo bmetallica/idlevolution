@@ -45,14 +45,43 @@ export async function fetchGithubUser(token) {
 }
 
 // ── Einstellungen (eine Zeile in online_settings) ──
+// Der GitHub-Token wird at-rest verschlüsselt (AES-256-GCM, Schlüssel aus
+// AI_IMPORT_TOKEN abgeleitet) — schützt DB-Dumps/Backups. Im ctx lebt er
+// entschlüsselt; er verlässt den Server nie.
+import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
+import { config } from '../config.js';
+
+const encKey = () => createHash('sha256').update(`idlevolution-online:${config.aiImportToken || ''}`).digest();
+
+function encryptToken(token) {
+  const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', encKey(), iv);
+  const data = Buffer.concat([c.update(token, 'utf8'), c.final()]);
+  return `enc:${iv.toString('base64')}:${c.getAuthTag().toString('base64')}:${data.toString('base64')}`;
+}
+function decryptToken(stored) {
+  if (typeof stored !== 'string' || !stored.startsWith('enc:')) return stored; // Legacy-Klartext
+  const [, iv, tag, data] = stored.split(':');
+  const d = createDecipheriv('aes-256-gcm', encKey(), Buffer.from(iv, 'base64'));
+  d.setAuthTag(Buffer.from(tag, 'base64'));
+  return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
+}
+
 export async function loadOnline(pool) {
   const { rows } = await pool.query('SELECT data FROM online_settings WHERE id = 1');
-  return rows[0]?.data || {};
+  const data = rows[0]?.data || {};
+  if (data.token) {
+    try { data.token = decryptToken(data.token); }
+    catch { delete data.token; } // Schlüssel geändert → Neu-Verbinden nötig
+  }
+  return data;
 }
 export async function saveOnline(pool, data) {
+  const stored = { ...data };
+  if (stored.token && !String(stored.token).startsWith('enc:')) stored.token = encryptToken(stored.token);
   await pool.query(
     `INSERT INTO online_settings (id, data, updated_at) VALUES (1, $1, now())
      ON CONFLICT (id) DO UPDATE SET data = $1, updated_at = now()`,
-    [data]
+    [stored]
   );
 }

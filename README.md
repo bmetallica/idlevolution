@@ -305,7 +305,7 @@ Das Backup rotiert (`BACKUP_KEEP`, Standard 14). Empfohlen als Host-Cron **vor**
 ## 🧪 Entwicklung
 
 ```bash
-cd server && npm install && npm test     # 52 Unit-Tests (Validator, Balancer, Engine, Bedürfnisse, Welt/Inseln, Schiffe, Handel)
+cd server && npm install && npm test     # 64 Unit-Tests (Validator, Balancer, Engine, Welt/Inseln, Schiffe, Handel, Krieg, Online)
 cd web && npm install && npm run dev      # Vite-Dev-Server mit API-Proxy auf :8420
 ```
 

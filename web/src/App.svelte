@@ -621,14 +621,14 @@
                 <input type="number" min="1" bind:value={offGiveAmt} class="w-12 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
                 <select bind:value={offGive} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
                   <option value="">gebe…</option>
-                  {#each (state?.resources || []).filter((r) => r.amount >= 1) as r}<option value={r.id}>{resourceIndex[r.id]?.icon || ''} {resourceIndex[r.id]?.name?.de || r.id}</option>{/each}
+                  {#each (state?.resources || []).filter((r) => r.amount >= 1 && resourceIndex[r.id]?.category !== 'special') as r}<option value={r.id}>{resourceIndex[r.id]?.icon || ''} {resourceIndex[r.id]?.name?.de || r.id}</option>{/each}
                 </select>
               </div>
               <div class="flex items-center gap-1 mt-1">
                 <input type="number" min="1" bind:value={offWantAmt} class="w-12 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
                 <select bind:value={offWant} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
                   <option value="">nehme…</option>
-                  {#each (content?.resources || []) as r}<option value={r.id}>{r.icon || ''} {r.name?.de || r.id}</option>{/each}
+                  {#each (content?.resources || []).filter((r) => r.category !== 'special') as r}<option value={r.id}>{r.icon || ''} {r.name?.de || r.id}</option>{/each}
                 </select>
                 <button class="rounded bg-amber-700 hover:bg-amber-600 disabled:opacity-40 px-2 text-white text-sm" on:click={submitOffer} disabled={aiBusy || !offGive || !offWant}>+</button>
                 {#if oTrade?.connected}
@@ -728,7 +728,7 @@
                   </select>
                   <select bind:value={sendRes} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
                     <option value="">Ware…</option>
-                    {#each (state?.resources || []).filter((r) => r.amount >= 1) as r}<option value={r.id}>{resourceIndex[r.id]?.icon || ''} {resourceIndex[r.id]?.name?.de || r.id}</option>{/each}
+                    {#each (state?.resources || []).filter((r) => r.amount >= 1 && resourceIndex[r.id]?.category !== 'special') as r}<option value={r.id}>{resourceIndex[r.id]?.icon || ''} {resourceIndex[r.id]?.name?.de || r.id}</option>{/each}
                   </select>
                   <input type="number" min="1" bind:value={sendAmt} class="w-14 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
                   <button class="rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-2 text-white" on:click={sendGoods} disabled={aiBusy || !sendTo || !sendRes} title="Verschiffen">➤</button>

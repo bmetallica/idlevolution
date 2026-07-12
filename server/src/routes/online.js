@@ -233,6 +233,8 @@ export default async function onlineRoutes(fastify) {
     try {
       const s = canPublish();
       const { giveRes, giveAmt, wantRes, wantAmt } = req.body || {};
+      const spec = (rid) => ctx.registryHolder.registry.resources.get(rid)?.category === 'special';
+      if (spec(giveRes) || spec(wantRes)) throw new Error('Militärgüter sind nicht handelbar');
       const offer = createOnlineOffer(tradeState(), ctx.human, s.username, { resourceId: giveRes, amount: giveAmt }, { resourceId: wantRes, amount: wantAmt });
       await persistTrade();
       return { ok: true, offer };

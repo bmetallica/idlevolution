@@ -5,6 +5,10 @@
 // Vereinfachtes Schema für die LLM-Grammatik (ohne $refs/propertyNames, die
 // llama.cpp's json-schema-to-grammar nicht zuverlässig unterstützt).
 const numberMap = { type: 'object', additionalProperties: { type: 'number' } };
+// ID-Form schon in der Grammatik erzwingen — eliminiert eine ganze Fehlerklasse
+// an der Quelle. Unterstützt eine llama.cpp-Version das Pattern nicht, greift
+// die Format-Kaskade in generatePack() (json_object → none) plus Validator.
+const idStr = { type: 'string', pattern: '^[a-z][a-z0-9_]{1,40}$' };
 const i18n = {
   type: 'object',
   properties: { de: { type: 'string' }, en: { type: 'string' } },
@@ -29,7 +33,7 @@ export function llmPackSchema() {
         items: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
+            id: idStr,
             name: i18n,
             description: i18n,
             category: { enum: ['raw', 'processed', 'food', 'luxury', 'special'] },
@@ -45,7 +49,7 @@ export function llmPackSchema() {
         items: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
+            id: idStr,
             name: i18n,
             description: i18n,
             category: { enum: ['production', 'storage', 'housing', 'civic'] },
@@ -92,6 +96,10 @@ export function llmPackSchema() {
                     roof: { type: 'string' },
                   },
                 },
+                military: {
+                  type: 'object',
+                  properties: { defense: { type: 'number' } },
+                },
               },
             },
           },
@@ -103,7 +111,7 @@ export function llmPackSchema() {
         items: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
+            id: idStr,
             order: { type: 'integer' },
             name: i18n,
             description: i18n,
@@ -137,6 +145,7 @@ Du antwortest AUSSCHLIESSLICH mit einem JSON-Objekt (Content-Pack) mit diesen op
 - "buildings": Array neuer Gebäude: { id, name:{de,en}, description:{de}, category (production|storage|housing|civic), epoch, icon (1 Emoji), cost:{ressourceId:menge}, buildTimeTicks, workers, production:{inputs:{},outputs:{}}, storage:{ressourceId:kapazität} oder {"*":kapazität}, housing:{capacity}, requires:{epoch,buildings:{},resources:{},population}, placement:{terrain:["grass"|"sand"], adjacent:{"forest"|"rock"|"water"|"grass": anzahl 1-8}} }
   Das Spiel hat eine Insel-Karte mit den Terrains grass, sand, forest, rock, water. "placement.terrain" = worauf gebaut wird (Standard: grass), "placement.adjacent" = welches Terrain angrenzen muss (z.B. Mine braucht rock, Fischer braucht water), "placement.size" = Grundfläche {w,h} in Feldern (1-4, Standard 1×1; Lager/Zivilbauten gern 2×1 oder 2×2). Setze IMMER ein glaubwürdiges placement passend zur Funktion des Gebäudes.
   GRAFIK ("meta.art"): Die Engine zeichnet Gebäude prozedural. Wähle mit "meta.art.shape" die passende Silhouette — erlaubt: house, farm, woodcutter, sawmill, gatherer, mine, quarry, smelter (Schmelze/Ofen, glüht), workshop, fishery, market, temple, tower, warehouse. (Ohne shape wird der Typ automatisch aus Funktion/Name erraten.) Für neue Zeitalter/Materialien kannst du das Aussehen anpassen: "meta.art.accent" = Signaturfarbe (Hex, z.B. "#c94f2a"), "meta.art.wall"/"meta.art.roof" = Wand-/Dachfarbe (Hex) für epochentypische Baustoffe.
+  MILITÄR ("meta.military"): Das Spiel hat ein Kriegssystem (Soldaten, Raubzüge, Verteidigung). Du darfst epochentypische WEHRANLAGEN einführen (category "civic", z.B. Palisade → Steinmauer → Bastion): "meta.military.defense" = Verteidigungswert (10–15 × Epochen-Order, workers 0, shape "tower"). Selten einsetzen (höchstens 1 je Pack, nur wenn die Epoche noch keine hat).
 - "epochs": Array mit maximal EINER neuen Epoche: { id, order, name:{de,en}, description:{de}, advance (oder null wenn vorerst final), modifiers, tier, needs }. Bei einer neuen Epoche sind PFLICHT:
     • "modifiers": { "productionMultiplier": (steigt je Epoche, z.B. +0.2 gegenüber der Vorepoche), "populationGrowth": (klein, z.B. 0.012–0.02) }
     • "tier": { "name": {de,en} } = wie die Bevölkerung dieser Stufe heißt (Steinzeit "Jäger & Sammler" → "Siedler" → "Bürger" → …).
@@ -157,9 +166,21 @@ HARTE REGELN:
 11. VIELFALT & TERRAIN: Nutze das Terrain thematisch — Fischer/Häfen an "water" (placement.adjacent {water}), Minen/Steinbrüche an "rock", Förster/Jäger an "forest", Farmen/Gärten auf "grass". Variiere die Gebäude-Typen (unterschiedliche meta.art.shape statt immer "workshop").
 12. WOHNEN & KOMFORT: Führe pro neuer Epoche mindestens ein besseres Wohngebäude ein (mehr housing.capacity als die Vorepoche) sowie 1-2 "luxury"-Güter (Komfortwaren), die als Epochen-"needs" die Zufriedenheit der höheren Bevölkerungsstufe tragen — mit passenden Produzenten.`;
 
-  const user = `Hier ist der aktuelle Siedlungs-Status als JSON:
+  // Verbotsliste PROMINENT an den Anfang: die häufigste historische Ablehnung
+  // war das erneute Anlegen existierender Epochen/IDs — tief in gaps[] vergraben
+  // hat das Modell die Info übersehen. Kompakt + zuerst = stark gewichtet.
+  const existing = [
+    `VERBOTEN — diese IDs existieren bereits und dürfen NIEMALS neu angelegt werden:`,
+    `- Epochen: ${(exportData.allEpochs || []).map((e) => `${e.id}(order ${e.order})`).join(', ') || '—'}`,
+    `- Ressourcen: ${(exportData.resources || []).map((r) => r.id).join(', ') || '—'}`,
+    `- Gebäude: ${(exportData.buildings || []).map((b) => b.id).join(', ') || '—'}`,
+  ].join('\n');
 
-${JSON.stringify(exportData, null, 1)}
+  // Kompaktes JSON (keine Einrückung) — spart ~30 % Tokens gegenüber null,1
+  const user = `${existing}
+
+Aktueller Siedlungs-Status (JSON):
+${JSON.stringify(exportData)}
 
 Analysiere die "gaps" und den Zustand der Wirtschaft. Erzeuge ein Content-Pack mit 1-3 neuen Gebäuden und 0-2 neuen Ressourcen, das die größten Lücken schließt und die nächste Spielphase vorbereitet. Falls der Epochen-Aufstieg nah ist und die Folge-Epoche fehlt oder leer ist, fülle sie. Antworte nur mit dem JSON-Objekt.`;
 
@@ -169,12 +190,26 @@ Analysiere die "gaps" und den Zustand der Wirtschaft. Erzeuge ein Content-Pack m
   ];
 }
 
-function extractJSON(text) {
-  const cleaned = text.replace(/```(?:json)?/g, '').trim();
+export function extractJSON(text) {
+  const cleaned = String(text)
+    .replace(/<think>[\s\S]*?<\/think>/gi, '') // Reasoning-Präambel
+    .replace(/```(?:json)?/g, '')
+    .trim();
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
   if (start === -1 || end === -1 || end <= start) throw new Error('keine JSON-Struktur in der Antwort');
-  return JSON.parse(cleaned.slice(start, end + 1));
+  const slice = cleaned.slice(start, end + 1);
+  try {
+    return JSON.parse(slice);
+  } catch (err) {
+    // Häufige LLM-Kleinfehler reparieren statt die Nacht zu verlieren:
+    // NBSP, rohe Steuerzeichen in Strings, trailing commas.
+    const repaired = slice
+      .replace(/\u00a0/g, ' ')
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '')
+      .replace(/,\s*([}\]])/g, '$1');
+    try { return JSON.parse(repaired); } catch { throw err; }
+  }
 }
 
 export async function chatCompletion(llm, messages, responseFormat) {
@@ -209,13 +244,7 @@ export async function chatCompletion(llm, messages, responseFormat) {
   return content;
 }
 
-/**
- * Erzeugt ein Content-Pack. Probiert strukturierte Ausgabeformate in absteigender
- * Strenge — je nach llama.cpp-Version wird json_schema oder json_object unterstützt.
- * @returns {{pack: object, raw: string, formatUsed: string}}
- */
-export async function generatePack(exportData, llm, balance) {
-  const messages = buildMessages(exportData, balance);
+async function completeWithFormats(llm, messages) {
   const schema = llmPackSchema();
   const formats = [
     { name: 'json_schema', rf: { type: 'json_schema', json_schema: { name: 'content_pack', schema } } },
@@ -236,4 +265,34 @@ export async function generatePack(exportData, llm, balance) {
     }
   }
   throw new Error(`Generierung fehlgeschlagen: ${lastErr?.message}`);
+}
+
+/**
+ * Erzeugt ein Content-Pack. Probiert strukturierte Ausgabeformate in absteigender
+ * Strenge — je nach llama.cpp-Version wird json_schema oder json_object unterstützt.
+ * @returns {{pack: object, raw: string, formatUsed: string}}
+ */
+export async function generatePack(exportData, llm, balance) {
+  return completeWithFormats(llm, buildMessages(exportData, balance));
+}
+
+/**
+ * Reparatur-Runde: Ein abgelehntes Pack wird mit der konkreten Fehlerliste
+ * EINMAL ans LLM zurückgegeben. Konkrete Fehler korrigieren können auch kleine
+ * Modelle zuverlässig — das rettet Nächte, die sonst komplett verloren wären.
+ * @returns {{pack: object, raw: string, formatUsed: string}}
+ */
+export async function repairPack(exportData, llm, balance, previousRaw, reasons) {
+  const messages = [
+    ...buildMessages(exportData, balance),
+    { role: 'assistant', content: String(previousRaw).slice(0, 24000) },
+    {
+      role: 'user',
+      content: `Dein Content-Pack wurde bei der Prüfung ABGELEHNT. Konkrete Gründe:
+${reasons.map((r) => `- ${r}`).join('\n')}
+
+Korrigiere GENAU diese Punkte (verbotene/duplizierte IDs entfernen oder umbenennen, fehlende Produzenten im selben Pack ergänzen oder das betroffene Item weglassen, Zahlen in die erlaubten Grenzen bringen). Ändere sonst NICHTS. Antworte erneut NUR mit dem vollständigen, korrigierten JSON-Objekt.`,
+    },
+  ];
+  return completeWithFormats(llm, messages);
 }

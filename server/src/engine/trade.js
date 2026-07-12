@@ -12,11 +12,13 @@ import { findHarbor, dispatchShip } from './ships.js';
  */
 export function aiConsiderTrade(world, players, ai, registry, tick) {
   if (ai.kind !== 'ai' || ai.active === false || !findHarbor(ai)) return null;
-  const isFood = (rid) => registry.resources.get(rid)?.category === 'food';
+  // Nahrung (Überleben) und special (Soldaten & Co.) sind KEINE Handelsware —
+  // sonst verkauft die KI ihre eigene Armee.
+  const untradable = (rid) => ['food', 'special'].includes(registry.resources.get(rid)?.category);
   for (const o of world.offers || []) {
     if (o.owner === ai.id) continue;
-    const surplus = (ai.resources[o.want.resourceId] || 0) > o.want.amount * 4 && !isFood(o.want.resourceId);
-    const canUse = (ai.resources[o.give.resourceId] || 0) < o.give.amount * 2;
+    const surplus = (ai.resources[o.want.resourceId] || 0) > o.want.amount * 4 && !untradable(o.want.resourceId);
+    const canUse = (ai.resources[o.give.resourceId] || 0) < o.give.amount * 2 && !untradable(o.give.resourceId);
     if (surplus && canUse) {
       try { acceptOffer(world, players, ai, o.id, tick); return o; } catch { /* nächstes Angebot */ }
     }
@@ -35,7 +37,7 @@ export function aiPostOffer(world, ai, registry, tick) {
 
   let give = null, giveStock = 0;
   for (const [rid, amt] of Object.entries(ai.resources || {})) {
-    if (amt > 120 && amt > giveStock && registry.resources.get(rid)?.category !== 'food') { give = rid; giveStock = amt; }
+    if (amt > 120 && amt > giveStock && !['food', 'special'].includes(registry.resources.get(rid)?.category)) { give = rid; giveStock = amt; }
   }
   if (!give) return null;
 
@@ -43,7 +45,7 @@ export function aiPostOffer(world, ai, registry, tick) {
   for (const b of registry.buildings.values()) for (const r of Object.keys(b.production?.inputs || {})) consumed.add(r);
   let want = null, wantStock = Infinity;
   for (const rid of consumed) {
-    if (rid === give || registry.resources.get(rid)?.category === 'food') continue;
+    if (rid === give || ['food', 'special'].includes(registry.resources.get(rid)?.category)) continue;
     const amt = ai.resources[rid] || 0;
     if (amt < 25 && amt < wantStock) { want = rid; wantStock = amt; }
   }

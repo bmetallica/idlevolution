@@ -31,9 +31,11 @@ export function defenseOf(player, registry) {
  * Kriegserklärung: stellt Soldaten verbindlich ab (Treuhand) und kündigt den
  * Raubzug öffentlich an — die Schlacht schlägt sich beim nächtlichen KI-Lauf.
  */
+export const MIN_RAID_TROOPS = 5; // verhindert 1-Mann-Spam-Erklärungen
+
 export function declareWar(world, attacker, defender, soldiers) {
   soldiers = Math.floor(Number(soldiers) || 0);
-  if (soldiers < 1) throw new Error('Mindestens 1 Soldat');
+  if (soldiers < MIN_RAID_TROOPS) throw new Error(`Ein Raubzug braucht mindestens ${MIN_RAID_TROOPS} Soldaten`);
   if (attacker.id === defender.id) throw new Error('Das ist deine eigene Insel');
   if (defender.active === false) throw new Error('Diese Insel ist unbewohnt');
   if (armyOf(attacker) < soldiers) throw new Error(`Nur ${armyOf(attacker)} Soldaten verfügbar`);
