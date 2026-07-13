@@ -278,3 +278,142 @@ Geprüft und in Ordnung: `/api/build` ohne Sofort-Save (Design: Tick-Loop
 persistiert ≤ 1 min, nur Spieler-Daten betroffen), acceptOffer-Guards vor
 Abbuchung, Publish-Reentranz beim Sync (wirft kontrolliert), Schiffs-Uhr nach
 Offline-Sprung (Lieferung im ersten Live-Tick).
+
+---
+
+## Runde 3 — Gesamtspiel-Review (2026-07-13, max. Tiefe)
+
+Nach den zwei Wirtschafts-Vorfällen (unerfüllbare needs `90b82bf`, Multiplikator-
+Regression `80b1ae7`) das ganze Spiel neu durchdacht: Kernschleife, Engine-
+Mechanik, LLM-Rollen, Client, Betrieb. **Vier neue Befunde sind am Code
+verifiziert** (keine Spekulation); der Rest ist Design-Weiterdenken.
+
+### 9. Neue verifizierte Befunde
+
+- 🔴 **S/M — Produktion ignoriert die echte Bevölkerung** (`tick.js:54`):
+  `eff = min(1, b.workers/needWorkers)` nutzt die ZUGEWIESENEN Arbeiter —
+  nirgends wird gegen die tatsächliche workforce geprüft. Seit Zuweisungen
+  bei Schwund bewusst erhalten bleiben, produziert eine Insel nach einem
+  Bevölkerungseinbruch (Raubzug! Hunger!) einfach auf altem Niveau weiter —
+  Verluste sind wirtschaftlich folgenlos, Überzuweisung ist ein Exploit.
+  Fix: globaler Besetzungsfaktor `min(1, workforce/assignedTotal)` multiplikativ
+  auf `eff` (in Deltas UND flows/rates, damit die Anzeige stimmt). Damit werden
+  Raubzug-Verluste spürbar und heilen sich beim Nachwachsen von selbst.
+- 🔴 **M — HiDPI/Retina-Blur** (`IsoMap.svelte resize()`): Canvas wird in
+  CSS-Pixeln aufgezogen (`canvas.width = clientWidth`), `devicePixelRatio`
+  wird nie berücksichtigt → auf praktisch jedem Smartphone (DPR 2–3) und
+  Retina-Desktop rendert das ganze Spiel weichgezeichnet. Fix: physisch
+  `width×dpr`, logisch weiterzeichnen via `ctx.setTransform(dpr,…)`;
+  Sprite-/Insel-Bakes in DPR backen (Speicher-Abwägung: Bakes ×dpr² —
+  ggf. dpr auf 2 deckeln). Pointer-Mathe bleibt in CSS-px.
+- 🟡 **M — Toter Contenttyp `events`**: Schema, Loader und Registry führen
+  `events` vollständig mit — **keine einzige Engine-Zeile verarbeitet sie**.
+  Entweder streichen oder (empfohlen) als Mini-Event-Engine beleben:
+  zeitlich begrenzte, harmlose Modifikatoren („Sturm: −15 % Holz für 2 h",
+  „Erntefest: +10 % Zufriedenheit"), 1–2 pro Tag, seeded-deterministisch,
+  Toast + Chronik-Eintrag. Gibt der Nacht-KI eine **gefahrlose** neue
+  Spielwiese (temporär ⇒ kein Dauerschaden; Balancer-Deckel ±20 %, ≤ 1 Tag).
+- 🟡 **S — Log-Spam**: Fastify loggt jeden Request auf info — /api/state
+  alle 2 s + /api/players alle 3 s = Dauerrauschen, wächst unbegrenzt
+  (Docker-Log). Fix: `disableRequestLogging: true` + gezielte Fehler-Logs
+  (Fehler/5xx weiterhin loggen), optional Docker-log-rotate in compose.
+
+### 10. Spieldesign — Kernschleife
+
+- 🔴 **M — Epochen-Aufstieg als Spieler-Entscheidung:** Der Auto-Aufstieg
+  hat den Nacht-Vorfall erst scharf gemacht (neue needs + neuer Multiplikator
+  ohne Zutun um 3 Uhr nachts). Stattdessen: Bedingungen erfüllt → Banner-CTA
+  „Aufstieg bereit!" mit **Vorschau** (neue Bedürfnisse inkl. ✓/⚠ aus
+  chainWorkerCost gegen die eigene Produktion, neuer Multiplikator, neue
+  Gebäude) → bewusster Klick. KI-Spieler steigen weiter automatisch
+  (Executor-Stabilitäts-Gate existiert). Engine: advance nur markieren,
+  `POST /api/advance` führt aus.
+- 🔴 **M — Offline-Bericht („Während du weg warst"):** Beim ersten Poll nach
+  Abwesenheit ein Digest: Δ Bevölkerung/Epoche, Kämpfe (warLog), Handels-
+  Abschlüsse, Schiffs-Ankünfte, LLM-Nachtchronik. Server sammelt beim Boot
+  ohnehin Offline-Events — sie verpuffen nur. DER klassische Idle-Moment,
+  aktuell komplett stumm.
+- 🟡 **M — Arbeiter-Management-Panel:** Die Engine arbeitet pro Gebäude-TYP —
+  nur die UI dafür fehlt (aktuell nur ±1 im InfoPanel je angeklicktem
+  Gebäude). Panel mit Typ-Zeilen (zugewiesen/max, ±, Balken), Button
+  „Auto-verteilen" (autoAssignWorkers ist exportiert!), 📌-Pin für die
+  Nahrungskette, Warn-Badge „unbesetzt" auf der Karte.
+- 🟡 **S — Hunger-Härte proportional:** `popDeclineRate` wirkt binär voll ab
+  dem ersten fehlenden Krümel Nahrung. Proportional zu `unmet/foodNeed`
+  skalieren — kleine Defizite = leichter Schwund statt Maximal-Sterberate.
+- 🟡 **S/M — Verlaufs-Graphen:** Client-Ringpuffer (Pop, Zufriedenheit,
+  Nahrungs-Netto) + Canvas-Sparklines im Panel. Trends sichtbar machen,
+  BEVOR sie kippen — die Todesspirale war 8 h lang unsichtbar.
+- 🟢 **M/L — LLM-Tagesziele (Quests):** Nightly generiert 3 messbare Ziele
+  („Baue 2 Wehrtürme", „Erreiche 700 Einwohner", „Lagere 200 Stahl") mit
+  kleinen, balancer-gedeckelten Belohnungen; Validierung rein mechanisch
+  (aus State ableitbar). Nutzt die lokale KI erstmals für GAMEPLAY-Richtung
+  statt nur Content — passt perfekt zum Projektkern.
+- 🟢 **M — Sound-Layer:** komplett stumm heute. WebAudio, synthetisiert
+  (keine Assets): Bau-Thud, Münze, Meeresrauschen, Nacht-Grillen; Mute
+  persistiert. Größter Atmosphäre-Gewinn pro Zeile Code.
+
+### 11. Engine-Robustheit v2
+
+- 🟡 **M — Sandbox „Post-Advance":** Der Import simuliert 1000 Ticks im
+  IST-Zustand — der Multiplikator-0.3-Fehler lag aber in der NÄCHSTEN
+  Epoche. Zusätzliche Sandbox-Variante: Klon mit `epochId = neueEpoche`,
+  1000 Ticks, Ablehnung wenn Bevölkerung > 50 % fällt. Fängt ganze Klassen
+  unbekannter Mechanik-Fallen, nicht nur die zwei bekannten.
+- 🟡 **S/M — Topologische Produktionsreihenfolge:** Ketten-Durchsatz hängt
+  heute von der Einfüge-Reihenfolge in `state.buildings` ab (Verbraucher vor
+  Produzent = 1 Tick Versatz + Null-Puffer-Flackern). Einmal pro Registry-
+  Reload topologisch sortieren (Produzenten zuerst), Engine iteriert die
+  sortierte Liste.
+- 🟢 **M — Ökonomie-Langlauftest:** 10k-Tick-Test mit geskriptetem Standard-
+  Aufbau, Assert `pop_end ≥ pop_start` & keine Ressource NaN/∞ — dauerhaftes
+  Frühwarnsystem gegen künftige Spiralen (CI-tauglich, Engine ist rein).
+- 🟢 **S — `npm run balance:report`:** das heutige Diagnose-Skript
+  (Kettenkosten aller needs, Multiplikator-Kette, Deckungs-Check) als
+  dauerhaftes Werkzeug einchecken.
+
+### 12. LLM v2
+
+- 🟡 **S — Modell-Routing pro Rolle:** llama-swap hostet mehrere Modelle
+  (gesehen: Qwen2.5-Omni, devstral, …). `LLM_MODEL_NIGHTLY` (groß, Qualität,
+  Latenz egal) vs. `LLM_MODEL_CHAT` (klein, schnell für Advisor/Strategist).
+  Drei Callsites + zwei Env-Variablen.
+- 🟡 **S — Nightly-Telemetrie im 🤖-Panel:** Acceptance-Quote, letzte
+  Clamps/Reparatur-Runden, „letzter Lauf vor X h" (ai_runs liegt bereit) —
+  macht auch einen still gestorbenen ai-worker sofort sichtbar.
+- 🟢 **S — Themen-Rotation gegen Content-Monotonie:** Prompt rotiert Fokus
+  (Kultur → Militär → Luxus → Infrastruktur → Kuriosum) nach Wochentag/
+  Pack-Zähler; verhindert die x-te Werkstatt-Variante.
+- 🟢 **M — Advisor-Streaming (SSE):** Antwort tokenweise ins Panel statt
+  30-s-Blackbox.
+- *(weiter offen aus Runde 1–2: Zwei-Phasen-Generierung, LLM-Queue mit
+  Priorität, `aggression` aktivieren = User-Entscheid.)*
+
+### 13. Client & Betrieb
+
+- 🟡 **S — `scripts/deploy.sh`:** build web → compose build/up (app,
+  ai-worker) → dist kopieren → healthz-Gate. Der manuelle Vierschritt ist
+  fehleranfällig (heute mehrfach am falschen cwd gescheitert).
+- 🟡 **S — ai-worker-Watchdog:** compose-healthcheck + „letzter Nightly"-
+  Status (siehe Telemetrie) — aktuell stirbt der Scheduler lautlos.
+- 🟢 **S — /healthz ausbauen:** uptime, aktive Spieler, letzter Nightly-
+  Status, Welt-Tick — eine Zeile für Monitoring.
+- 🟢 **S — Optionaler `GAME_TOKEN`:** schreibende Spiel-API absicherbar,
+  falls je ein Port ins Internet zeigt (Standard: aus, LAN bleibt frei).
+- 🟢 **S — README-Verweis auf opti.md** + Doku-Dopplung Multiplayer auflösen
+  (aus Runde 1 weiter offen).
+
+### Gesamt-Roadmap v2
+
+**Phase A — Korrektheit sofort:** Besetzungsfaktor (9) · HiDPI (9) ·
+Log-Spam (9) · deploy.sh (13)
+**Phase B — Spielgefühl:** Epochen-Entscheidung (10) · Offline-Bericht (10) ·
+Arbeiter-Panel (10) · Hunger proportional (10)
+**Phase C — Absicherung:** Post-Advance-Sandbox (11) · Langlauftest (11) ·
+balance:report (11) · Watchdog + Telemetrie (12/13)
+**Phase D — Lebendigkeit:** Event-Engine (9) · Sparklines (10) · Sound (10) ·
+Themen-Rotation + Modell-Routing (12)
+**Phase E — Kür:** Quests (10) · Advisor-SSE (12) · Onboarding · PNG-Icons ·
+EpochBanner-Mobile · /api/frame-Bündelung · GAME_TOKEN
+**Blockiert/extern:** Cross-Account-Test (2. GitHub-Account) ·
+`aggression` (User-Entscheid)
