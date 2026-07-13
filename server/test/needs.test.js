@@ -44,3 +44,19 @@ test('balancePack kappt Epochen-needs inkl. Pack-eigener Produzenten', () => {
   assert.ok(out.epochs[0].needs.ware <= 0.0032);
   assert.ok(notes.some((n) => n.includes('gekappt')));
 });
+
+test('Balancer: productionMultiplier darf nie unter die Vorepoche fallen', () => {
+  const registry = {
+    epochs: new Map([['a0', { id: 'a0', order: 0, modifiers: { productionMultiplier: 1.5 } }]]),
+    resources: new Map(),
+    buildings: new Map(),
+  };
+  const pack = { epochs: [{ id: 'a1', order: 1, modifiers: { productionMultiplier: 0.3 } }], epochAdvance: { a0: { population: 10 } } };
+  const { pack: out, notes } = balancePack(pack, registry, {});
+  assert.ok(out.epochs[0].modifiers.productionMultiplier >= 1.5, 'angehoben statt Regression');
+  assert.ok(notes.some((n) => n.includes('angehoben')));
+  // fehlende modifiers werden ebenfalls repariert
+  const pack2 = { epochs: [{ id: 'a1', order: 1 }], epochAdvance: { a0: { population: 10 } } };
+  const r2 = balancePack(pack2, registry, {});
+  assert.ok(r2.pack.epochs[0].modifiers.productionMultiplier >= 1.5);
+});

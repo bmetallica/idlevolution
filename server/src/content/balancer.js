@@ -56,12 +56,21 @@ export function balancePack(pack, registry, balance) {
       packEpochs.delete(e.id);
       return false;
     }
-    if (e.modifiers?.productionMultiplier !== undefined) {
+    {
       const prev = [...registry.epochs.values()].find((p) => p.order === e.order - 1);
       const prevMult = prev?.modifiers?.productionMultiplier ?? 1;
       const cap = prevMult * (1 + (balance.maxIncreaseOverBest ?? 0.25));
-      if (e.modifiers.productionMultiplier > cap) {
-        notes.push(`Epoche '${e.id}': productionMultiplier ${e.modifiers.productionMultiplier} → ${cap.toFixed(2)} gekappt`);
+      e.modifiers ??= {};
+      const m = e.modifiers.productionMultiplier;
+      if (m === undefined || m < prevMult) {
+        // MONOTONIE: Der Fortschritt in eine neue Epoche darf die Produktion NIE
+        // senken — mult 0.3 nach 1.2 hat historisch die gesamte Wirtschaft
+        // (inkl. Nahrung) auf 25 % kollabieren lassen (Todesspirale über Nacht).
+        const fixed = Math.min(cap, prevMult * 1.1);
+        notes.push(`Epoche '${e.id}': productionMultiplier ${m ?? '—'} → ${fixed.toFixed(2)} angehoben (nie unter Vorepoche ${prevMult})`);
+        e.modifiers.productionMultiplier = fixed;
+      } else if (m > cap) {
+        notes.push(`Epoche '${e.id}': productionMultiplier ${m} → ${cap.toFixed(2)} gekappt`);
         e.modifiers.productionMultiplier = cap;
       }
     }
