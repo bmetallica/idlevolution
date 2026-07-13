@@ -43,6 +43,7 @@ const ARCH_RULES = [
   { a: 'harbor', re: /(harbor|harbour|hafen|\bdock|\bpier|\bsteg|jetty|anleger|\bquay|\bkai\b|wharf|marina|\bboot|\bboat)/ },
   { a: 'fishery', re: /(\bfish|fisch|\bnet\b|netz|whal|\bwal\b|pearl|perle|\bsalt|\bsalz)/ },
   { a: 'gatherer', re: /(gather|sammler|forager|\bhunt|jäg|berry|beere|\broot|wurzel|foraging)/ },
+  { a: 'fountain', re: /(brunnen|fountain|\bwell\b|zisterne|cistern|springquell)/ },
   { a: 'market', re: /(market|markt|\btrade|handel|bazaar|basar|\bshop|kontor|guild|gilde|merchant|händler)/ },
   { a: 'temple', re: /(temple|tempel|church|kirche|shrine|schrein|monument|denkmal|altar|chapel|kapelle|cathedral|\bdom\b|pyramid)/ },
   { a: 'tower', re: /(tower|\bturm|watch|wacht|\bkeep\b|castle|burg|\bfort|festung|lighthouse|leuchtturm|hall|halle|rathaus)/ },
@@ -63,11 +64,28 @@ export function classifyArchetype(def) {
   }
   return classifyByFunction(def) || fallbackByCategory(def.category);
 }
+// Produktions-Silhouetten, die für Lager/Wohnhäuser nie passen (eine
+// "Vorratsgrube" ist ein Lager, kein Steinbruch — auch wenn "grube" matcht).
+const PROD_ARCH = new Set(['farm', 'mine', 'quarry', 'smelter', 'sawmill', 'woodcutter', 'gatherer', 'fishery', 'workshop', 'harbor']);
+
 function classifyByFunction(def) {
-  const parts = [def.id, def.name?.de, def.name?.en, def.description?.de,
-    ...Object.keys(def.production?.outputs || {}), ...Object.keys(def.production?.inputs || {})];
-  const hay = parts.filter(Boolean).join(' ').toLowerCase();
-  for (const { a, re } of ARCH_RULES) if (re.test(hay)) return a;
+  // Gestaffelt: ID+Name wiegen schwerer als die Beschreibung, die schwerer als
+  // Produktions-Güter. Ein WERKZEUGmacher, dessen Beschreibung "Bretter" erwähnt
+  // und der planks verbraucht, ist eine Werkstatt — kein Sägewerk.
+  const hays = [
+    [def.id, def.name?.de, def.name?.en].filter(Boolean).join(' ').toLowerCase(),
+    (def.description?.de || '').toLowerCase(),
+    [...Object.keys(def.production?.outputs || {}), ...Object.keys(def.production?.inputs || {})].join(' ').toLowerCase(),
+  ];
+  const blocked = def.category === 'storage' || def.category === 'housing';
+  for (const hay of hays) {
+    if (!hay) continue;
+    for (const { a, re } of ARCH_RULES) {
+      if (!re.test(hay)) continue;
+      if (blocked && PROD_ARCH.has(a)) continue;
+      return a;
+    }
+  }
   return null;
 }
 function fallbackByCategory(cat) {
@@ -106,7 +124,7 @@ function boxCorners(c, base, height) {
   };
 }
 
-const WALL_H = { house: 20, farm: 16, woodcutter: 17, sawmill: 18, gatherer: 16, mine: 16, quarry: 12, smelter: 22, workshop: 20, fishery: 16, harbor: 13, market: 20, temple: 26, tower: 40, warehouse: 15 };
+const WALL_H = { house: 20, farm: 16, woodcutter: 17, sawmill: 18, gatherer: 16, mine: 16, quarry: 12, smelter: 22, workshop: 20, fishery: 16, harbor: 13, market: 20, temple: 26, tower: 40, warehouse: 15, fountain: 6 };
 function wallHeight(arch, foot) { return (WALL_H[arch] ?? 20) + foot * 3; }
 
 // ── Zeichen-Primitive ─────────────────────────────────────────────────────────
@@ -229,6 +247,30 @@ function doorAndWindows(g, top, wall, rot = 0) {
   else { winLeft(); winRight(); }
 }
 
+// Brunnen: rundes Steinbecken mit Wasser + Mittelsäule (kein Haus-Kasten).
+function fountainBody(g, cc, pal, foot, w, h) {
+  const rx = TILE_W * 0.42 * w, ry = TILE_H * 0.42 * h;
+  // Beckenwand: unten dunkel (Tiefe), oben Steinrand mit klarer Kontur
+  g.fillStyle = shade(pal.wall, 0.5);
+  g.beginPath(); g.ellipse(cc.x, cc.y + 3.5, rx, ry, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = shade(pal.wall, 0.92);
+  g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 1;
+  g.beginPath(); g.ellipse(cc.x, cc.y - 1.5, rx, ry, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+  // Wasserfläche (satt, mit dunklem Grundton für Tiefe)
+  g.fillStyle = '#1f6598';
+  g.beginPath(); g.ellipse(cc.x, cc.y - 1.5, rx * 0.76, ry * 0.76, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#3c8ec4';
+  g.beginPath(); g.ellipse(cc.x, cc.y - 2.2, rx * 0.68, ry * 0.68, 0, 0, Math.PI * 2); g.fill();
+  // Mittelsäule mit oberer Schale + Wasserstrahl-Basis
+  const colH = 11 + foot * 2;
+  g.fillStyle = shade(pal.wall, 0.65); g.fillRect(cc.x - 2.5, cc.y - 2 - colH, 5, colH);
+  g.fillStyle = shade(pal.wall, 0.95);
+  g.strokeStyle = 'rgba(0,0,0,0.3)';
+  g.beginPath(); g.ellipse(cc.x, cc.y - 2 - colH, rx * 0.32, ry * 0.32, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.fillStyle = '#4a9bd0';
+  g.beginPath(); g.ellipse(cc.x, cc.y - 2.8 - colH, rx * 0.22, ry * 0.22, 0, 0, Math.PI * 2); g.fill();
+}
+
 // ── Statischer Gebäudekörper (einmal gerendert & gecacht) ─────────────────────
 function drawStaticInternal(g, def, gx, gy, w, h, epochOrder, rot = 0) {
   const pal = paletteFor(def, epochOrder);
@@ -240,6 +282,19 @@ function drawStaticInternal(g, def, gx, gy, w, h, epochOrder, rot = 0) {
   // Bodenschatten
   g.fillStyle = 'rgba(0,0,0,0.2)';
   g.beginPath(); g.ellipse(cc.x, cc.y + 2, TILE_W * 0.44 * w, TILE_H * 0.44 * h, 0, 0, Math.PI * 2); g.fill();
+
+  // Brunnen ist KEIN Gebäudekasten — eigener Körper, ohne Wände/Dach/Fenster
+  if (arch === 'fountain') {
+    fountainBody(g, cc, pal, foot, w, h);
+    if (def.icon) {
+      g.font = `${11 + foot}px serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      const ey = cc.y - 34 - foot * 3;
+      g.fillStyle = 'rgba(0,0,0,0.16)'; g.beginPath(); g.arc(cc.x, ey, 7.5 + foot, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#000'; g.fillText(def.icon, cc.x, ey + 1);
+      g.textBaseline = 'alphabetic';
+    }
+    return;
+  }
 
   const wH = wallHeight(arch, foot);
   const flat = arch === 'warehouse' || arch === 'quarry' || arch === 'harbor';
@@ -346,6 +401,25 @@ export function drawBuildingFX(g, def, gx, gy, w, h, epochOrder, time, id, night
   const top = boxCorners(c, 0, wH);
   const pal = paletteFor(def, epochOrder);
   const roofH = (arch === 'market' ? 12 : 14) + foot * 2;
+
+  // Plätschernde Fontäne (Brunnen hat weder Fenster noch Schornstein)
+  if (arch === 'fountain') {
+    const cc = center4(c);
+    const colTop = cc.y - 2 - (12 + foot * 2);
+    for (let i = 0; i < 4; i++) {
+      const ph = ((time / 620) + i / 4) % 1;
+      const dx = (i - 1.5) * 2.4 * ph;
+      const py = colTop - Math.sin(ph * Math.PI) * 7 + ph * (10 + foot * 2);
+      g.globalAlpha = 0.85 - ph * 0.6;
+      g.fillStyle = '#cfe8ff';
+      g.beginPath(); g.arc(cc.x + dx, py, 1.3, 0, Math.PI * 2); g.fill();
+    }
+    g.globalAlpha = 0.08 + Math.sin(time / 480) * 0.04; // dezentes Glitzern
+    g.fillStyle = '#ffffff';
+    g.beginPath(); g.ellipse(cc.x, cc.y - 2, TILE_W * 0.2 * w, TILE_H * 0.2 * h, 0, 0, Math.PI * 2); g.fill();
+    g.globalAlpha = 1;
+    return;
+  }
 
   // Fensterlicht bei Nacht (nur wenn Gebäude Fenster hat)
   if (night > 0.25 && arch !== 'mine' && arch !== 'quarry') {
