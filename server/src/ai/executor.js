@@ -22,33 +22,63 @@ function foodNetRate(registry, player, rates) {
   return r;
 }
 
-/** Verteilt freie Arbeiter auf unterbesetzte Gebäude — Nahrung > Bedürfnisse > Rest. */
-function autoAssignWorkers(registry, player) {
+/** Verteilt freie Arbeiter auf unterbesetzte Gebäude — Nahrung > Bedarfs-KETTE > Rest.
+ *  Innerhalb eines Rangs im Round-Robin (je 1 Arbeiter pro Runde), damit bei
+ *  Überkapazität kein Kettenglied leer ausgeht (z.B. 40 Minen saugen sonst
+ *  alle Arbeiter auf, bevor der Hochofen einen einzigen bekommt). */
+export function autoAssignWorkers(registry, player) {
   const workforce = Math.floor(player.population);
   let assigned = Object.values(player.buildings).reduce((s, b) => s + (b.workers || 0), 0);
   let idle = workforce - assigned;
   if (idle <= 0) return;
   const epoch = currentEpoch(registry, player);
+
+  // Bedarfs-Güter TRANSITIV durch ihre Vorketten erweitern: Rüstung braucht
+  // Stahl braucht Eisenbarren braucht Erz — die ganze Kette ist überlebenswichtig.
   const needIds = new Set(Object.keys(epoch?.needs || {}));
+  let grew = true;
+  for (let depth = 0; grew && depth < 8; depth++) {
+    grew = false;
+    for (const d of registry.buildings.values()) {
+      if (!Object.keys(d.production?.outputs || {}).some((r) => needIds.has(r))) continue;
+      for (const inp of Object.keys(d.production?.inputs || {})) {
+        if (!needIds.has(inp)) { needIds.add(inp); grew = true; }
+      }
+    }
+  }
+
   const rawMats = new Set();
   for (const d of registry.buildings.values()) for (const r of Object.keys(d.cost || {})) if (registry.resources.get(r)?.category !== 'food') rawMats.add(r);
   const rank = (bid) => {
     const def = registry.buildings.get(bid);
     if (!def?.production) return 5;
     const outs = Object.keys(def.production.outputs || {});
-    if (producesFood(registry, def)) return 0;               // Nahrung zuerst
-    if (outs.some((r) => rawMats.has(r))) return 1;          // Baumaterial (Holz/Stein/Bretter)
-    if (outs.some((r) => needIds.has(r))) return 2;          // Stufen-Bedürfnisse
+    if (producesFood(registry, def)) return 0;               // Nahrung zuerst (Überleben)
+    if (outs.some((r) => needIds.has(r))) return 1;          // Bedarfs-Kette (Zufriedenheit = Überleben!)
+    if (outs.some((r) => rawMats.has(r))) return 2;          // Baumaterial (Holz/Stein/Bretter)
     return 3;                                                 // Rest
   };
-  const order = Object.keys(player.buildings).sort((a, b) => rank(a) - rank(b));
-  for (const bid of order) {
-    if (idle <= 0) break;
+
+  const byRank = new Map();
+  for (const bid of Object.keys(player.buildings)) {
     const def = registry.buildings.get(bid);
     const b = player.buildings[bid];
-    if (!def || !b?.count) continue;
-    const max = (def.workers || 0) * b.count;
-    while ((b.workers || 0) < max && idle > 0) { b.workers = (b.workers || 0) + 1; idle--; }
+    if (!def || !b?.count || !(def.workers > 0)) continue;
+    const r = rank(bid);
+    if (!byRank.has(r)) byRank.set(r, []);
+    byRank.get(r).push({ b, max: def.workers * b.count });
+  }
+  for (const r of [...byRank.keys()].sort((a, b) => a - b)) {
+    const group = byRank.get(r);
+    let progress = true;
+    while (idle > 0 && progress) {
+      progress = false;
+      for (const g of group) {
+        if (idle <= 0) break;
+        if ((g.b.workers || 0) < g.max) { g.b.workers = (g.b.workers || 0) + 1; idle--; progress = true; }
+      }
+    }
+    if (idle <= 0) break;
   }
 }
 

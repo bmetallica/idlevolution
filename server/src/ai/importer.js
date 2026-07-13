@@ -5,6 +5,7 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { validateStructure, validateReferences } from '../content/validator.js';
 import { balancePack } from '../content/balancer.js';
+import { chainWorkerCost, maxAffordableNeed } from '../content/needs.js';
 import { mergePack, cloneRegistry, epochsInOrder } from '../content/loader.js';
 import { runTicks } from '../engine/tick.js';
 import { logEvent } from '../engine/state.js';
@@ -100,15 +101,18 @@ function ensureEpochNeeds(pack, registry) {
     for (const b of pack.buildings || []) if ((b.production?.outputs || {})[rid] > 0) return true;
     return false;
   };
+  // Nach GÜNSTIGSTER Vorkette sortieren (nicht höchstem baseValue!) — das
+  // teuerste Gut als Bedürfnis war die historische Todesspiral-Ursache.
+  const allBuildings = [...registry.buildings.values(), ...(pack.buildings || [])];
   const comfort = [...resById.values()]
     .filter((r) => ['processed', 'luxury'].includes(r.category) && hasProducer(r.id))
-    .sort((a, b) => (b.baseValue || 0) - (a.baseValue || 0));
+    .sort((a, b) => chainWorkerCost(allBuildings, a.id) - chainWorkerCost(allBuildings, b.id));
 
   for (const e of pack.epochs) {
-    if (e.needs && Object.keys(e.needs).length) continue; // LLM hat needs gesetzt
+    if (e.needs && Object.keys(e.needs).length) continue; // LLM hat needs gesetzt (Balancer kappt)
     const eo = e.order ?? 0;
     const good = comfort.find((r) => (epochOrder.get(r.epoch) ?? 0) <= eo) || comfort[0];
-    if (good) e.needs = { [good.id]: 0.01 };
+    if (good) e.needs = { [good.id]: Math.min(0.01, maxAffordableNeed(allBuildings, good.id)) };
   }
 }
 

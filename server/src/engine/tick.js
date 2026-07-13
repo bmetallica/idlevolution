@@ -249,12 +249,15 @@ export function runTick(registry, state, game) {
   for (const res of registry.resources.values()) if (res.category === 'food') foodStock += Math.max(0, state.resources[res.id] ?? 0);
   const housing = totalHousing(registry, state, game);
   const growth = epochNow?.modifiers?.populationGrowth ?? 0.01;
+  // Untergrenze: Die Siedlung stirbt nie unter ihre Gründungs-Bevölkerung —
+  // ein harter Kern bleibt immer (verhindert Totalverlust über Nacht).
+  const popFloor = Math.max(1, game.initial?.population ?? 5);
   if (unmet > 0.000001) {
     // Hunger → Bevölkerung schrumpft
-    state.population = Math.max(1, state.population * (1 - game.popDeclineRate));
+    state.population = Math.max(popFloor, state.population * (1 - game.popDeclineRate));
   } else if (satisfaction < 0.4) {
     // Güter fehlen → Unzufriedenheit, leichte Abwanderung (skaliert mit Fehlbetrag)
-    state.population = Math.max(1, state.population * (1 - game.popDeclineRate * (0.4 - satisfaction)));
+    state.population = Math.max(popFloor, state.population * (1 - game.popDeclineRate * (0.4 - satisfaction)));
   } else if (state.population < housing && foodStock > foodNeed) {
     // Wachstum nur bei Nahrungs-Puffer (verhindert Überschwingen in die Hungersnot);
     // durch Zufriedenheit gebremst (0.4→40 %, 1.0→100 % der Wachstumsrate)

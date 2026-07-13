@@ -1,4 +1,5 @@
 // Balancing-Schutz für KI-generierte Packs. Grenzen kommen aus data/balance.config.json.
+import { clampEpochNeeds } from './needs.js';
 // Strategie: Werte werden wo möglich auf die Grenze gekappt (Clamping, mit Notiz);
 // harte Verstöße (Produktion aus dem Nichts, Epochen-Sprünge) führen zur Ablehnung des Items.
 
@@ -66,6 +67,12 @@ export function balancePack(pack, registry, balance) {
     }
     return true;
   });
+
+  // Epochen-Bedürfnisse an die KETTEN-Arbeiterkosten koppeln: ein Bedarf, dessen
+  // Vorkette mehr Arbeiter bindet als es Einwohner gibt, ist unerfüllbar und
+  // führt in die Todesspirale (historisch: armor 0.01 = 110 % der Bevölkerung).
+  const allBuildings = [...registry.buildings.values(), ...(out.buildings || [])];
+  for (const e of out.epochs || []) notes.push(...clampEpochNeeds(allBuildings, e));
 
   // Bester existierender Netto-Wert pro Tick je Epochen-Order (für die Relativ-Grenze)
   const bestNetByOrder = new Map();

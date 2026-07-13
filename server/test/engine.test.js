@@ -67,15 +67,16 @@ test('Tick: Sägewerk steht still ohne Holz-Input', () => {
 });
 
 test('Bevölkerung bremst sich bei Güter-Mangel selbst und kollabiert nicht auf 1', () => {
-  // bronze_age verlangt tools (0.01/Kopf/Tick). Ein Toolmaker produziert 0.15/Tick —
-  // bei 100 Einwohnern (Bedarf 1.0) deutlich zu wenig → Unzufriedenheit → Rückgang.
-  // Erwartung: pendelt sich beim tragfähigen Niveau ein (~0.15/(0.4*0.01)=37.5),
+  // bronze_age verlangt tools (0.0043/Kopf/Tick — kettenkosten-gedeckelt).
+  // Ein Toolmaker produziert ~0.15-0.18/Tick — bei 250 Einwohnern (Bedarf ~1.08)
+  // deutlich zu wenig → Unzufriedenheit → Rückgang.
+  // Erwartung: pendelt sich beim tragfähigen Niveau ein (~Produktion/(0.4*0.0043)),
   // NICHT Kollaps auf 1, und die Nahrungskette wird nicht abgebaut.
   // Großes Lager isoliert die Bevölkerungs-Dynamik von Zulieferung/Lager-Cap.
   const bigStore = { ...game, baseStorage: 1e9 };
   const state = freshState({
     epochId: 'bronze_age',
-    population: 100,
+    population: 250,
     resources: { wood: 0, stone: 1e6, food: 1e5, planks: 1e6, tools: 0 },
     buildings: {
       gatherer_hut: { count: 20, workers: 40 }, // Nahrung 12/Tick ≫ Bedarf → nie Hunger
@@ -83,8 +84,8 @@ test('Bevölkerung bremst sich bei Güter-Mangel selbst und kollabiert nicht auf
     },
   });
   for (let i = 0; i < 4000; i++) runTick(registry, state, bigStore);
-  assert.ok(state.population > 20, `Bevölkerung kollabierte auf ${state.population.toFixed(1)}`);
-  assert.ok(state.population < 100, `Bevölkerung hätte schrumpfen müssen (${state.population.toFixed(1)})`);
+  assert.ok(state.population > 50, `Bevölkerung kollabierte auf ${state.population.toFixed(1)}`);
+  assert.ok(state.population < 250, `Bevölkerung hätte schrumpfen müssen (${state.population.toFixed(1)})`);
   assert.equal(state.buildings.gatherer_hut.workers, 40, 'Nahrungs-Arbeiter dürfen bei Rückgang nicht abgebaut werden');
   assert.ok(state.resources.food > 0, 'Nahrung darf nicht kollabieren');
   assert.ok(state.satisfaction >= 0.38, `Zufriedenheit am Gleichgewicht zu niedrig (${state.satisfaction.toFixed(2)})`);
@@ -544,8 +545,8 @@ test('Bedürfnisse: gedeckter Bedarf hält Zufriedenheit und verbraucht die Güt
   });
   runTick(registry, state, game);
   assert.equal(state.satisfaction, 1);
-  // needs.tools = 0.01 × 10 Bevölkerung = 0.1 pro Tick
-  assert.ok(Math.abs(state.resources.tools - 4.9) < 1e-9, 'tools werden als Bedarf verbraucht');
+  // needs.tools = 0.0043 × 10 Bevölkerung = 0.043 pro Tick (kettenkosten-gedeckelt)
+  assert.ok(Math.abs(state.resources.tools - (5 - 0.043)) < 1e-9, 'tools werden als Bedarf verbraucht');
 });
 
 test('Bedürfnisse: Steinzeit ohne needs bleibt voll zufrieden', () => {
