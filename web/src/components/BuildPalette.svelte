@@ -7,6 +7,7 @@
   export let activeId = null; // aktuell gewähltes Bau-Gebäude
   export let newPackIds = new Set();
   export let mobile = false; // Mobile: unteres, horizontal scrollbares Dock statt linker Leiste
+  export let topOffset = 48; // Desktop: obere Kante = gemessene Höhe der Materialleiste (weicht ihr aus)
 
   const dispatch = createEventDispatcher();
 
@@ -143,7 +144,7 @@
     </div>
   </div>
 {:else}
-<div class="absolute left-0 top-12 bottom-0 z-30 w-72 flex flex-col bg-stone-950/92 backdrop-blur border-r border-stone-700 pointer-events-auto">
+<div class="absolute left-0 bottom-0 z-30 w-72 flex flex-col bg-stone-950/92 backdrop-blur border-r border-stone-700 pointer-events-auto" style="top: {topOffset}px">
   <div class="px-3 py-2 border-b border-stone-800 flex items-center justify-between">
     <span class="text-sm font-semibold text-amber-200">🏗️ Bauen</span>
     <span class="text-[10px] text-stone-500"><kbd class="px-1 bg-stone-800 rounded">R</kbd> drehen</span>

@@ -1,11 +1,11 @@
 // Minimaler Service-Worker für die PWA-Installierbarkeit + App-Shell-Fallback.
 // Netzwerk-zuerst (das Spiel braucht die API live); der zuletzt geladene
 // App-Shell dient nur als Offline-Rückfall. API-Aufrufe werden nie gecacht.
-const CACHE = 'idlevolution-shell-v1';
+const CACHE = 'idlevolution-shell-v2';
 
 self.addEventListener('install', (e) => {
   self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html', '/manifest.webmanifest', '/icon.svg'])));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'])));
 });
 
 self.addEventListener('activate', (e) => {

@@ -40,18 +40,99 @@ function productionMultiplier(registry, state) {
   return epochMult * logistics;
 }
 
+// ── D1: Event-Engine — zeitlich begrenzte, harmlose Modifikatoren ──
+// Der Contenttyp `events` (Schema/Loader/Registry) existierte von Anfang an,
+// wurde aber nie verarbeitet. Jetzt: 1 Event/Tag je Spieler, deterministisch
+// (Hash aus Spieler+Tag → reproduzierbar, kein RNG-Drift zwischen Sandbox und
+// Live), Wirkung nur temporär (production-Multiplikator je Gut + einmaliger
+// grant beim Start) — die gefahrlose Spielwiese für die Nacht-KI.
+export const EVENT_DAY_TICKS = 17280; // 24 h bei 5-s-Ticks
+const EVENT_MULT_MIN = 0.5, EVENT_MULT_MAX = 2; // harte Engine-Grenze (Balancer kappt enger)
+
+function eventHash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+/** Aktueller production-Faktor eines aktiven Events für eine Ressource (1 = neutral). */
+export function eventProductionFactor(registry, state, rid) {
+  const active = state.activeEvent;
+  if (!active) return 1;
+  const ev = registry.events?.get?.(active.id);
+  if (!ev || state.tick > active.endsAtTick) return 1;
+  const prod = ev.modifiers?.production || {};
+  const raw = prod[rid] ?? prod['*'] ?? 1;
+  return Math.max(EVENT_MULT_MIN, Math.min(EVENT_MULT_MAX, raw));
+}
+
+/** Event-Lebenszyklus: startet/beendet Ereignisse. Liefert Events fürs Log.
+ *  Nur für echte Spieler (kind gesetzt) — kind-lose Zustände (kalibrierte Tests,
+ *  Skripte) bleiben deterministisch ohne Ereignis-Rauschen. */
+function tickEvents(registry, state, game) {
+  const out = [];
+  if (!state.kind) return out;
+  if (!registry.events || registry.events.size === 0) return out;
+  // Ablauf
+  if (state.activeEvent && state.tick >= state.activeEvent.endsAtTick) {
+    const ev = registry.events.get(state.activeEvent.id);
+    out.push({ type: 'event_end', payload: { id: state.activeEvent.id, name: ev?.name?.de } });
+    state.activeEvent = null;
+  }
+  if (state.activeEvent) return out;
+  // Deterministischer Start: je (Spieler, Tag) ein Zeitfenster + Event-Wahl
+  const day = Math.floor(state.tick / EVENT_DAY_TICKS);
+  if ((state.lastEventDay ?? -1) >= day) return out;
+  const h = eventHash(`${state.id ?? 0}|${day}`);
+  const startTick = day * EVENT_DAY_TICKS + (h % EVENT_DAY_TICKS);
+  if (state.tick < startTick) return out;
+  // Nur Events, deren (Mindest-)Epoche erreicht ist
+  const curOrder = currentEpoch(registry, state)?.order ?? 0;
+  const pool = [...registry.events.values()].filter((e) => !e.epoch || (epochOrder(registry, e.epoch) ?? 0) <= curOrder);
+  if (!pool.length) { state.lastEventDay = day; return out; }
+  const ev = pool[h % pool.length];
+  const duration = Math.max(1, Math.min(EVENT_DAY_TICKS, ev.durationTicks ?? 720));
+  state.activeEvent = { id: ev.id, endsAtTick: state.tick + duration };
+  state.lastEventDay = day;
+  // Einmaliger grant beim Start (an Lagerkapazität gekappt, nie negativ)
+  for (const [rid, amount] of Object.entries(ev.modifiers?.grant || {})) {
+    if (!(amount > 0)) continue;
+    const cap = registry.resources.get(rid)?.storable === false ? Infinity : storageCapacity(registry, state, game, rid);
+    state.resources[rid] = Math.min(cap, (state.resources[rid] ?? 0) + amount);
+  }
+  out.push({ type: 'event_start', payload: { id: ev.id, name: ev.name?.de, endsAtTick: state.activeEvent.endsAtTick } });
+  return out;
+}
+
+/**
+ * Globaler Besetzungsfaktor: Sind mehr Arbeiter ZUGEWIESEN als es Einwohner gibt
+ * (nach einem Bevölkerungseinbruch bleiben Zuweisungen bewusst erhalten, um die
+ * Todesspirale zu vermeiden), skaliert die GESAMTE Produktion proportional herunter.
+ * So werden Verluste (Raubzug/Hunger) wirtschaftlich spürbar und heilen sich beim
+ * Nachwachsen von selbst. Da Bedarf UND Produktion linear mit der Bevölkerung
+ * skalieren, bleibt eine zuvor stabile Wirtschaft stabil (kein neuer Spiral-Effekt).
+ */
+export function staffingFactor(state) {
+  const workforce = Math.floor(state.population ?? 0);
+  let assigned = 0;
+  for (const b of Object.values(state.buildings || {})) assigned += b.workers ?? 0;
+  if (assigned <= 0) return 1;
+  return Math.min(1, workforce / assigned);
+}
+
 /**
  * Produktions-Deltas pro Tick je Gebäudetyp, begrenzt durch Arbeiter-Effizienz und
  * verfügbare Inputs. Gibt {resourceId: delta} zurück (ohne Lager-Cap, ohne Nahrungsverbrauch).
  */
 export function computeProductionDeltas(registry, state) {
   const mult = productionMultiplier(registry, state);
+  const staff = staffingFactor(state);
   const deltas = {};
   for (const [id, b] of Object.entries(state.buildings)) {
     const def = registry.buildings.get(id);
     if (!def?.production || b.count <= 0) continue;
     const needWorkers = (def.workers ?? 0) * b.count;
-    const eff = needWorkers > 0 ? Math.min(1, (b.workers ?? 0) / needWorkers) : 1;
+    const eff = (needWorkers > 0 ? Math.min(1, (b.workers ?? 0) / needWorkers) : 1) * staff;
     if (eff <= 0) continue;
 
     // Input-Limitierung: läuft nur so weit, wie Vorräte reichen
@@ -69,7 +150,7 @@ export function computeProductionDeltas(registry, state) {
       deltas[rid] = (deltas[rid] ?? 0) - rate * b.count * eff * inputFactor;
     }
     for (const [rid, rate] of Object.entries(def.production.outputs || {})) {
-      deltas[rid] = (deltas[rid] ?? 0) + rate * b.count * eff * inputFactor * mult;
+      deltas[rid] = (deltas[rid] ?? 0) + rate * b.count * eff * inputFactor * mult * eventProductionFactor(registry, state, rid);
     }
   }
   return deltas;
@@ -92,6 +173,7 @@ export function computeNetRates(registry, state, game) {
  */
 export function computeResourceFlows(registry, state, game) {
   const mult = productionMultiplier(registry, state);
+  const staff = staffingFactor(state);
   const flows = {};
   const deltas = {}; // laufende Verfügbarkeit wie in computeProductionDeltas (Input-Limitierung)
   const add = (rid, label, amount) => {
@@ -103,7 +185,7 @@ export function computeResourceFlows(registry, state, game) {
     const def = registry.buildings.get(id);
     if (!def?.production || b.count <= 0) continue;
     const needWorkers = (def.workers ?? 0) * b.count;
-    const eff = needWorkers > 0 ? Math.min(1, (b.workers ?? 0) / needWorkers) : 1;
+    const eff = (needWorkers > 0 ? Math.min(1, (b.workers ?? 0) / needWorkers) : 1) * staff;
     if (eff <= 0) continue;
     let inputFactor = 1;
     for (const [rid, rate] of Object.entries(def.production.inputs || {})) {
@@ -118,7 +200,7 @@ export function computeResourceFlows(registry, state, game) {
     for (const [rid, rate] of Object.entries(def.production.inputs || {}))
       add(rid, name, -rate * b.count * eff * inputFactor);
     for (const [rid, rate] of Object.entries(def.production.outputs || {}))
-      add(rid, name, rate * b.count * eff * inputFactor * mult);
+      add(rid, name, rate * b.count * eff * inputFactor * mult * eventProductionFactor(registry, state, rid));
   }
   // Bevölkerung: Nahrung (VOLLE Nachfrage, anteilig über alle food-Ressourcen).
   // Volle Nachfrage statt gedeckeltem Verbrauch, damit Unterdeckung als negative
@@ -215,6 +297,9 @@ export function runTick(registry, state, game) {
   const events = [];
   state.tick += 1;
 
+  // 0) Event-Engine (D1): Tages-Ereignisse starten/beenden (wirken auf Produktion)
+  events.push(...tickEvents(registry, state, game));
+
   // 1) Fertiggestellte Bau-Instanzen übernehmen (inkrementell — Zähler in
   //    state.buildings bleiben Quelle für die Produktion, auch in der Sandbox)
   for (const inst of state.instances || []) {
@@ -253,8 +338,10 @@ export function runTick(registry, state, game) {
   // ein harter Kern bleibt immer (verhindert Totalverlust über Nacht).
   const popFloor = Math.max(1, game.initial?.population ?? 5);
   if (unmet > 0.000001) {
-    // Hunger → Bevölkerung schrumpft
-    state.population = Math.max(popFloor, state.population * (1 - game.popDeclineRate));
+    // Hunger → Bevölkerung schrumpft, PROPORTIONAL zum Fehlbetrag: ein knapp
+    // gedeckter Vorrat (2 % fehlen) sterbt nicht so hart wie eine echte Hungersnot.
+    const shortFrac = foodNeed > 0 ? Math.min(1, unmet / foodNeed) : 1;
+    state.population = Math.max(popFloor, state.population * (1 - game.popDeclineRate * shortFrac));
   } else if (satisfaction < 0.4) {
     // Güter fehlen → Unzufriedenheit, leichte Abwanderung (skaliert mit Fehlbetrag)
     state.population = Math.max(popFloor, state.population * (1 - game.popDeclineRate * (0.4 - satisfaction)));
@@ -277,16 +364,29 @@ export function runTick(registry, state, game) {
   //    auf 1 durchzulaufen. Zuweisungen begrenzt der Spieler beim Zuweisen selbst
   //    (freie Arbeiter = Bevölkerung − zugewiesen), siehe /api/workers.
 
-  // 5) Epochen-Aufstieg prüfen (advance-Bedingungen der AKTUELLEN Epoche)
+  // 5) Epochen-Aufstieg prüfen (advance-Bedingungen der AKTUELLEN Epoche).
+  //    MENSCHLICHE Spieler steigen NICHT mehr automatisch auf (B1): Der nächtliche
+  //    Auto-Aufstieg hat den Todesspiral-Vorfall erst scharf gemacht (neue needs +
+  //    neuer Multiplikator um 3 Uhr ohne Zutun). Stattdessen wird `advanceReady`
+  //    gesetzt — der bewusste Klick läuft über POST /api/advance. KI-Spieler und
+  //    kind-lose Zustände (Tests, Skripte) steigen weiterhin automatisch auf.
   const epoch = currentEpoch(registry, state);
   if (epoch?.advance) {
     const check = evaluateConditions(epoch.advance, registry, state);
-    if (check.ok) {
-      const next = epochsInOrder(registry).find((e) => e.order === epoch.order + 1);
-      if (next) {
+    const next = check.ok ? epochsInOrder(registry).find((e) => e.order === epoch.order + 1) : null;
+    if (next) {
+      if (state.kind === 'human') {
+        if (state.advanceReady !== next.id) {
+          state.advanceReady = next.id;
+          events.push({ type: 'epoch_ready', payload: { from: epoch.id, to: next.id } });
+        }
+      } else {
         state.epochId = next.id;
+        state.advanceReady = null;
         events.push({ type: 'epoch_advance', payload: { from: epoch.id, to: next.id } });
       }
+    } else if (state.advanceReady) {
+      state.advanceReady = null; // Bedingungen wieder unerfüllt (z.B. Ressourcen ausgegeben)
     }
   }
 
@@ -298,6 +398,25 @@ export function runTicks(registry, state, game, n) {
   const events = [];
   for (let i = 0; i < n; i++) events.push(...runTick(registry, state, game));
   return events;
+}
+
+/**
+ * Führt den Epochen-Aufstieg BEWUSST aus (B1: Spieler-Entscheidung via /api/advance).
+ * Prüft die advance-Bedingungen erneut — das advanceReady-Flag allein genügt nicht,
+ * weil Ressourcen zwischen Markierung und Klick ausgegeben worden sein können.
+ * @returns {{from: string, to: string}} bei Erfolg; wirft Error mit Klartext-Grund.
+ */
+export function advanceEpoch(registry, state) {
+  const epoch = currentEpoch(registry, state);
+  if (!epoch) throw new Error('Keine aktuelle Epoche');
+  if (!epoch.advance) throw new Error('Diese Epoche hat (noch) keine Aufstiegsbedingung');
+  const check = evaluateConditions(epoch.advance, registry, state);
+  if (!check.ok) throw new Error('Aufstiegsbedingungen nicht (mehr) erfüllt');
+  const next = epochsInOrder(registry).find((e) => e.order === epoch.order + 1);
+  if (!next) throw new Error('Es existiert noch keine Folge-Epoche');
+  state.epochId = next.id;
+  state.advanceReady = null;
+  return { from: epoch.id, to: next.id };
 }
 
 /** Freischaltstatus eines Gebäudes inkl. Begründung (fürs UI). */

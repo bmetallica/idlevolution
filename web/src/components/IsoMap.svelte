@@ -25,6 +25,10 @@
   export let tickSeconds = 5;
   export let reticle = false; // Mobile: Bauen per zentriertem Fadenkreuz + ✓ statt Tap
   export let erase = false; // Mobile: Radiermodus für Straßen/Deko (statt Rechtsklick)
+  export let moveMode = false; // Verschiebe-Werkzeug: eigenes Gebäude anwählen → auf neues Feld setzen
+  let movingInst = null; // im Verschiebe-Modus aufgenommenes Gebäude (Klick 1), bis Klick 2 es absetzt
+  // Modus verlassen → aufgenommenes Gebäude fallenlassen (Ghost verschwindet)
+  $: if (!moveMode && movingInst) movingInst = null;
   // Basis für die glatte Tick-Schätzung; aktualisiert, wenn ein neuer Server-Tick eintrifft
   $: if (shipTick !== rt?.shipBaseTick) { if (rt) { rt.shipBaseTick = shipTick; rt.shipBaseTime = performance.now(); } }
 
@@ -47,6 +51,7 @@
   const dispatch = createEventDispatcher();
 
   let canvas, ctx, wrap;
+  let dpr = 1; // devicePixelRatio (auf 2 gedeckelt) — Backing-Store & Bakes physisch, Logik in CSS-px
   let viewW = 800,
     viewH = 600;
   const camera = { x: 0, y: 0, zoom: 1 };
@@ -95,11 +100,12 @@
       const w = Math.max(1, Math.ceil(box.maxX - box.minX));
       const h = Math.max(1, Math.ceil(box.maxY - box.minY));
       const c = document.createElement('canvas');
-      c.width = w; c.height = h;
+      c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
       const g = c.getContext('2d');
+      g.scale(dpr, dpr); // physisch backen, logisch zeichnen (gridToScreen in CSS-px)
       const off = { x: -box.minX, y: -box.minY };
       for (const t of tiles) drawEach(g, t, off);
-      bakes.push({ canvas: c, ox: box.minX, oy: box.minY });
+      bakes.push({ canvas: c, ox: box.minX, oy: box.minY, w, h });
     }
     return bakes;
   }
@@ -305,7 +311,7 @@
     rt.now = performance.now();
     rt.amb = ambient(rt.now);
     const amb = rt.amb, now = rt.now;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // logische CSS-px auf physischen Backing-Store
     ctx.clearRect(0, 0, viewW, viewH);
     // Hintergrund = offenes Meer (kein dunkler Void), tageszeitabhängig
     const grd = ctx.createLinearGradient(0, 0, 0, viewH);
@@ -321,10 +327,10 @@
     // Per-Insel-Bakes blitten (nur sichtbare — Culling gegen den Weltausschnitt)
     const halfW = viewW / 2 / camera.zoom + 96, halfH = viewH / 2 / camera.zoom + 96;
     const vmnX = camera.x - halfW, vmxX = camera.x + halfW, vmnY = camera.y - halfH, vmxY = camera.y + halfH;
-    const bakeVis = (b) => b.ox < vmxX && b.ox + b.canvas.width > vmnX && b.oy < vmxY && b.oy + b.canvas.height > vmnY;
-    for (const b of terrainBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
-    for (const b of roadBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
-    for (const b of decoBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy);
+    const bakeVis = (b) => b.ox < vmxX && b.ox + b.w > vmnX && b.oy < vmxY && b.oy + b.h > vmnY;
+    for (const b of terrainBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy, b.w, b.h);
+    for (const b of roadBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy, b.w, b.h);
+    for (const b of decoBakes) if (bakeVis(b)) ctx.drawImage(b.canvas, b.ox, b.oy, b.w, b.h);
     if (paintSet.size) drawPaintPreview();
 
     // Mobile: der Bau-Geist klebt am Fadenkreuz (oberer Mittelbereich)
@@ -347,6 +353,29 @@
       } else {
         ctx.fillStyle = 'rgba(255,255,255,0.15)';
         fillDiamond(hover.gx, hover.gy);
+      }
+    }
+
+    // Verschiebe-Modus: aufgenommenes Gebäude als Ziel-Geist an der Maus (grün/rot),
+    // sein Herkunftsfeld mit gestricheltem Ring markiert.
+    if (moveMode && movingInst) {
+      const def = defIndex[movingInst.buildingId];
+      const src = instances.find((i) => i.id === movingInst.id) || movingInst;
+      const sc = centerOf(src);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(245,220,150,0.9)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+      ctx.lineDashOffset = -((rt.now / 60) % 8);
+      ctx.beginPath(); ctx.arc(sc.x, sc.y, 12, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      if (hover && def) {
+        const rot = movingInst.rot ?? 0;
+        const fp = footprintOf(def, rot);
+        const others = instances.filter((i) => i.id !== movingInst.id);
+        const check = canPlaceClient(map, others, defIndex, def, hover.gx, hover.gy, rot);
+        ctx.fillStyle = check.ok ? 'rgba(80,220,120,0.5)' : 'rgba(230,80,80,0.5)';
+        for (let dy = 0; dy < fp.h; dy++) for (let dx = 0; dx < fp.w; dx++) fillDiamond(hover.gx + dx, hover.gy + dy);
+        const geom = buildingViewGeom(hover.gx, hover.gy, fp);
+        drawBuildingSprite(ctx, { def, gx: geom.vx0, gy: geom.vy0, w: geom.w, h: geom.h, rot: (rot + viewRot) % 4, done: true, alpha: 0.6, time: now, epochOrder: epochIndex[def.epoch] ?? 0 });
       }
     }
 
@@ -388,7 +417,7 @@
     drawShortageBadges();
 
     // Tageszeit-Overlay (im Bildschirmraum)
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     if (amb.night > 0.01) {
       ctx.fillStyle = `rgba(18, 30, 66, ${amb.night * 0.5})`;
       ctx.fillRect(0, 0, viewW, viewH);
@@ -532,8 +561,9 @@
       const w = Math.max(1, Math.ceil(box.maxX - box.minX));
       const h = Math.max(1, Math.ceil(box.maxY - box.minY));
       const c = document.createElement('canvas');
-      c.width = w; c.height = h;
+      c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
       const g = c.getContext('2d');
+      g.scale(dpr, dpr);
       let drew = false;
       for (const key of roadSet) {
         const ci = key.indexOf(',');
@@ -545,7 +575,7 @@
         else drawRoadShape(g, px, py, null);
         drew = true;
       }
-      if (drew) roadBakes.push({ canvas: c, ox: box.minX, oy: box.minY });
+      if (drew) roadBakes.push({ canvas: c, ox: box.minX, oy: box.minY, w, h });
     }
   }
   // Live-Vorschau der gerade bearbeiteten Felder (Straße = Erde, Deko = farbige Raute)
@@ -621,8 +651,8 @@
       drawBuildingSprite(ctx, { def: def || {}, gx: geom.vx0, gy: geom.vy0, w: geom.w, h: geom.h, rot: effRot, done: false, progress, time: rt.now });
       return;
     }
-    const s = getBuildingSprite(def || {}, eo, geom.w, geom.h, effRot);
-    ctx.drawImage(s.bitmap || s.canvas, o.x - s.ax, o.y - s.ay);
+    const s = getBuildingSprite(def || {}, eo, geom.w, geom.h, effRot, dpr);
+    ctx.drawImage(s.bitmap || s.canvas, o.x - s.ax, o.y - s.ay, s.w, s.h);
     drawBuildingFX(ctx, def || {}, geom.vx0, geom.vy0, geom.w, geom.h, eo, rt.now, inst.id, rt.amb.night);
   }
 
@@ -819,6 +849,22 @@
     if (dragMoved) return; // war ein Schwenk, kein Klick
     const g = pointerToGrid(e.offsetX, e.offsetY);
     if (g.gx < 0 || g.gy < 0 || g.gx >= map.width || g.gy >= map.height) return;
+    if (moveMode) {
+      if (!movingInst) {
+        // Klick 1: eigenes, fertiges Gebäude aufnehmen (fremde/KI-Inseln nicht verschiebbar)
+        const inst = instanceAt(g.gx, g.gy);
+        if (inst && !inst._owner && inst.done) movingInst = inst;
+        else dispatch('moveinfo', { ok: false, reason: inst ? 'Nur eigene, fertige Gebäude sind verschiebbar.' : 'Kein Gebäude auf diesem Feld.' });
+      } else {
+        // Klick 2: auf neues Feld absetzen (Server prüft erneut)
+        const rot = movingInst.rot ?? 0;
+        const others = instances.filter((i) => i.id !== movingInst.id);
+        const check = canPlaceClient(map, others, defIndex, defIndex[movingInst.buildingId], g.gx, g.gy, rot);
+        dispatch('move', { instanceId: movingInst.id, x: g.gx, y: g.gy, ok: check.ok, reason: check.reason });
+        movingInst = null;
+      }
+      return;
+    }
     if (buildDef) {
       if (reticle) return; // Mobile: Platzierung nur über den ✓-Button (placeAtCenter)
       const check = canPlaceClient(map, instances, defIndex, buildDef, g.gx, g.gy, buildRot);
@@ -833,8 +879,16 @@
     if (!wrap) return;
     viewW = wrap.clientWidth;
     viewH = wrap.clientHeight;
-    canvas.width = viewW;
-    canvas.height = viewH;
+    // Backing-Store physisch (×dpr), CSS-Größe logisch → scharf auf Retina/Handy.
+    const nd = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const dprChanged = nd !== dpr;
+    dpr = nd;
+    canvas.width = Math.round(viewW * dpr);
+    canvas.height = Math.round(viewH * dpr);
+    canvas.style.width = viewW + 'px';
+    canvas.style.height = viewH + 'px';
+    // Wechselt der dpr zur Laufzeit (Fenster auf anderen Monitor), Bakes physisch neu.
+    if (dprChanged && terrainBaked) { buildTerrain(); bakeDeco(); buildRoadsCanvas(); }
   }
 
   function centerOnSettlement() {
@@ -911,7 +965,7 @@
 </script>
 
 <div
-  class="absolute inset-0 overflow-hidden {buildDef || roadMode || decoType ? 'cursor-crosshair' : dragging ? 'cursor-grabbing' : 'cursor-grab'}"
+  class="absolute inset-0 overflow-hidden {buildDef || roadMode || decoType || moveMode ? 'cursor-crosshair' : dragging ? 'cursor-grabbing' : 'cursor-grab'}"
   bind:this={wrap}
 >
   <canvas

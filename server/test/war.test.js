@@ -111,3 +111,27 @@ test('canPlace respektiert mehrere Regionen (generisches Territorium-Feature)', 
   assert.equal(canPlace(map, state, reg, def, 25, 5).ok, true);
   assert.equal(canPlace(map, state, reg, def, 15, 5).ok, false);
 });
+
+test('aggression aktiv: aggressive KI erklärt Raubzug nur bei klarer Überlegenheit', async () => {
+  const { aiConsiderWar } = await import('../src/engine/war.js');
+  const world = {};
+  // Aggressor: aggression 0.9, 30 Soldaten
+  const aggro = mkPlayer(1, { resources: { soldiers: 30 }, plan: { policies: { aggression: 0.9 } } });
+  // Schwaches Ziel (Verteidigung ~5 Miliz) und starkes Ziel
+  const weak = mkPlayer(2, { kind: 'human', population: 100 }); // def = 5 (Miliz)
+  const strong = mkPlayer(3, { resources: { soldiers: 40 }, population: 100 });
+  const reports = aiConsiderWar(world, [aggro, weak, strong], registry);
+  assert.equal(reports.length, 1, 'genau eine Erklärung erwartet');
+  assert.equal(world.warDeclarations.length, 1);
+  assert.equal(world.warDeclarations[0].defenderId, 2, 'schwächstes Ziel gewählt');
+  assert.equal(world.warDeclarations[0].soldiers, 18); // 60 % von 30
+  assert.equal(aggro.resources.soldiers, 12); // Treuhand abgezogen
+  // Max. 1 offene Erklärung: zweiter Lauf erklärt NICHT erneut
+  assert.equal(aiConsiderWar(world, [aggro, weak, strong], registry).length, 0);
+  // Friedliche KI (0.3) und unterlegene KI erklären nie
+  const peaceful = mkPlayer(4, { resources: { soldiers: 50 }, plan: { policies: { aggression: 0.3 } } });
+  const weakAggro = mkPlayer(5, { resources: { soldiers: 6 }, plan: { policies: { aggression: 0.9 } } });
+  assert.equal(aiConsiderWar({}, [peaceful, weak], registry).length, 0);
+  // weakAggro: army 6 > def(weak)=5×2? 6 < 10 → keine Erklärung
+  assert.equal(aiConsiderWar({}, [weakAggro, weak], registry).length, 0);
+});

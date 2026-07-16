@@ -247,24 +247,52 @@ function sandboxCheck(pack, ctx) {
   const { balance } = ctx;
   const registry = cloneRegistry(ctx.registryHolder.registry);
   mergePack(registry, pack, '<sandbox>');
-  const state = structuredClone(ctx.state);
-  // Optimistisches Szenario: alles Neue steht einmal und ist voll besetzt
-  for (const b of pack.buildings || []) {
-    state.buildings[b.id] = { count: 1, workers: b.workers ?? 0 };
-    state.population += b.workers ?? 0; // Sandbox darf großzügig sein
-  }
-  try {
-    runTicks(registry, state, ctx.game, balance.sandbox?.ticks ?? 1000);
-  } catch (err) {
-    return { ok: false, errors: [`Sandbox-Simulation abgestürzt: ${err.message}`] };
-  }
-  const errors = [];
+  const ticks = balance.sandbox?.ticks ?? 1000;
   const maxAmount = balance.sandbox?.maxResourceAmount ?? 1e9;
-  for (const [rid, amount] of Object.entries(state.resources)) {
-    if (!Number.isFinite(amount)) errors.push(`Sandbox: Ressource '${rid}' wurde ${amount}`);
-    else if (amount > maxAmount) errors.push(`Sandbox: Ressource '${rid}' explodiert (${amount.toExponential(2)})`);
+
+  // Ein Szenario aufsetzen: Klon des Live-Stands + alles Neue steht einmal (voll besetzt)
+  const makeState = () => {
+    const st = structuredClone(ctx.state);
+    for (const b of pack.buildings || []) {
+      st.buildings[b.id] = { count: 1, workers: b.workers ?? 0 };
+      st.population += b.workers ?? 0; // Sandbox darf großzügig sein
+    }
+    return st;
+  };
+  const simulate = (st, label) => {
+    const errors = [];
+    const popStart = st.population;
+    try {
+      runTicks(registry, st, ctx.game, ticks);
+    } catch (err) {
+      return [`Sandbox${label}: Simulation abgestürzt: ${err.message}`];
+    }
+    for (const [rid, amount] of Object.entries(st.resources)) {
+      if (!Number.isFinite(amount)) errors.push(`Sandbox${label}: Ressource '${rid}' wurde ${amount}`);
+      else if (amount > maxAmount) errors.push(`Sandbox${label}: Ressource '${rid}' explodiert (${amount.toExponential(2)})`);
+    }
+    if (!Number.isFinite(st.population)) errors.push(`Sandbox${label}: Bevölkerung wurde nicht-numerisch`);
+    // Bevölkerungs-Kollaps: > 50 % Verlust = das Pack macht die Wirtschaft zur Falle
+    else if (popStart > 10 && st.population < popStart * 0.5)
+      errors.push(`Sandbox${label}: Bevölkerung kollabiert ${Math.floor(popStart)} → ${Math.floor(st.population)} (> 50 % Verlust)`);
+    return errors;
+  };
+
+  // 1) IST-Zustand (wie bisher)
+  const errors = simulate(makeState(), '');
+
+  // 2) C1: Post-Advance-Szenario — der productionMultiplier-0.3-Vorfall lag in der
+  //    NÄCHSTEN Epoche und war im IST-Zustand unsichtbar. Existiert eine Folge-Epoche
+  //    (aus Registry ODER diesem Pack), wird der Aufstieg vorweggenommen und ebenfalls
+  //    simuliert: neue needs + neuer Multiplikator müssen die Bevölkerung tragen.
+  const cur = registry.epochs.get(ctx.state.epochId);
+  const next = cur ? epochsInOrder(registry).find((e) => e.order === cur.order + 1) : null;
+  if (next) {
+    const st2 = makeState();
+    st2.epochId = next.id;
+    errors.push(...simulate(st2, ` (nach Aufstieg auf '${next.id}')`));
   }
-  if (!Number.isFinite(state.population)) errors.push('Sandbox: Bevölkerung wurde nicht-numerisch');
+
   return { ok: errors.length === 0, errors };
 }
 

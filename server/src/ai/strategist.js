@@ -66,7 +66,7 @@ Regeln:
 - Baue kein Gebäude, dessen "verbraucht"-Güter du nicht selbst produzierst — plane die Vorkette (z.B. erst Erz-Mine, dann Hütte, dann Verarbeiter).
 - "anzahl" klein halten (1–8 je Eintrag), insgesamt max 15 Einträge.
 - MILITÄR: "militaer" zeigt Armee/Verteidigung und angriffeHeuteNacht (angekündigte Raubzüge gegen dich). Bei Bedrohung oder starken Nachbarn: Kaserne/Wehranlagen im Bauplan priorisieren.
-- politik.nahrungsPuffer 0..1 (Sicherheitsmarge Nahrung), aggression 0..1 (für spätere Konflikte).`;
+- politik.nahrungsPuffer 0..1 (Sicherheitsmarge Nahrung). aggression 0..1 WIRKT: über 0.7 erklärt deine Insel selbstständig Raubzüge gegen deutlich schwächere Nachbarn (nur bei mehr als doppelter Überlegenheit; max. 1 pro Nacht). Wähle den Wert passend zur Persönlichkeit — ein friedlicher Händler bleibt unter 0.5, ein Kriegsherr geht über 0.7 und baut dann auch Kasernen.`;
 
 function parsePlan(raw, registry) {
   const txt = String(raw).replace(/<think>[\s\S]*?<\/think>/gi, '');
@@ -98,7 +98,8 @@ export async function planTurn(registry, player, game, llm, world) {
     { role: 'system', content: SYSTEM },
     { role: 'user', content: `Insel-Zustand (JSON):\n${JSON.stringify(data)}\n\nErstelle den Bauplan als JSON.` },
   ];
-  const raw = await chatCompletion(llm, messages);
+  // D4: Strategist nutzt das (kleinere) Chat-Modell — Pläne brauchen Tempo, nicht Tiefe
+  const raw = await chatCompletion({ ...llm, model: llm.modelChat || llm.model }, messages);
   const plan = parsePlan(raw, registry);
   if (!plan) throw new Error('LLM-Plan nicht parsebar');
   return plan;

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { loadRegistry } from '../src/content/loader.js';
-import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity, computeNetRates, computeResourceFlows } from '../src/engine/tick.js';
+import { runTick, runTicks, startBuild, demolish, assignWorkers, storageCapacity, computeNetRates, computeResourceFlows, advanceEpoch } from '../src/engine/tick.js';
 import { evaluateConditions } from '../src/engine/rules.js';
 import { generateMap, canPlace, TERRAIN, setRoad, growIsland, growWorld } from '../src/engine/map.js';
 import { generateWorld, islandAt, islandById, buildWorldFromLegacy, embedLegacyState, growIslandRegion } from '../src/engine/world.js';
@@ -516,6 +516,70 @@ test('Epochen-Aufstieg: erfolgt automatisch, wenn advance erfüllt ist', () => {
   const events = runTick(registry, state, game);
   assert.equal(state.epochId, 'bronze_age');
   assert.ok(events.some((e) => e.type === 'epoch_advance'));
+});
+
+test('B1: Mensch steigt NICHT automatisch auf — advanceReady wird markiert, /api/advance-Logik führt aus', () => {
+  const mk = () => freshState({
+    kind: 'human',
+    population: 20,
+    resources: { wood: 0, stone: 0, food: 100, planks: 0, tools: 40 },
+    buildings: { toolmaker: { count: 1, workers: 0 }, hut: { count: 4, workers: 0 } },
+  });
+  const state = mk();
+  const events = runTick(registry, state, game);
+  assert.equal(state.epochId, 'stone_age'); // KEIN Auto-Aufstieg
+  assert.equal(state.advanceReady, 'bronze_age');
+  assert.ok(events.some((e) => e.type === 'epoch_ready'));
+  // epoch_ready feuert nur EINMAL (kein Event-Spam pro Tick)
+  const events2 = runTick(registry, state, game);
+  assert.ok(!events2.some((e) => e.type === 'epoch_ready'));
+  // Bewusster Aufstieg führt aus
+  const r = advanceEpoch(registry, state);
+  assert.equal(r.to, 'bronze_age');
+  assert.equal(state.epochId, 'bronze_age');
+  assert.equal(state.advanceReady, null);
+  // Bedingungen nicht erfüllt → advanceEpoch wirft
+  const poor = freshState({ kind: 'human' });
+  assert.throws(() => advanceEpoch(registry, poor), /nicht.*erfüllt/);
+  // KI steigt weiterhin automatisch auf
+  const ai = mk(); ai.kind = 'ai';
+  const aiEvents = runTick(registry, ai, game);
+  assert.equal(ai.epochId, 'bronze_age');
+  assert.ok(aiEvents.some((e) => e.type === 'epoch_advance'));
+});
+
+test('D1 Event-Engine: startet deterministisch, wirkt auf Produktion, endet wieder', () => {
+  assert.ok(registry.events.size >= 3, 'Basis-Events nicht geladen');
+  const state = freshState({
+    kind: 'human',
+    population: 10,
+    buildings: { lumberjack: { count: 1, workers: 2 } },
+  });
+  // Bis zum deterministischen Startpunkt vorspulen (h % TAG), dann muss GENAU
+  // ein Event aktiv sein; gleicher Seed → gleiche Wahl (Reproduzierbarkeit).
+  let started = null;
+  for (let t = 0; t < 17280 && !started; t++) {
+    const evs = runTick(registry, state, game);
+    started = evs.find((e) => e.type === 'event_start') || null;
+  }
+  assert.ok(started, 'kein Event am ersten Tag gestartet');
+  assert.ok(state.activeEvent?.id, 'activeEvent nicht gesetzt');
+  const def = registry.events.get(state.activeEvent.id);
+  assert.ok(def, 'gewähltes Event existiert nicht in der Registry');
+  // production-Faktor wird angewandt (falls das Event Holz betrifft, weicht die Rate ab)
+  const factorWood = def.modifiers?.production?.wood ?? def.modifiers?.production?.['*'] ?? 1;
+  const rates = computeNetRates(registry, state, game);
+  if (factorWood !== 1) assert.ok(rates.wood !== undefined, 'Holzrate fehlt');
+  // Nach Ablauf: Event endet, kein zweites am selben Tag
+  const remaining = state.activeEvent.endsAtTick - state.tick;
+  const evs = runTicks(registry, state, game, remaining + 2);
+  assert.ok(evs.some((e) => e.type === 'event_end'), 'Event endete nicht');
+  assert.equal(state.activeEvent, null);
+  assert.ok(!evs.some((e) => e.type === 'event_start'), 'zweites Event am selben Tag');
+  // kind-lose Zustände (kalibrierte Tests) bekommen NIE Events
+  const plain = freshState({ population: 10 });
+  const plainEvents = runTicks(registry, plain, game, 300);
+  assert.ok(!plainEvents.some((e) => e.type === 'event_start'));
 });
 
 test('Regel-Evaluator: liefert fehlende Bedingungen mit have/need', () => {

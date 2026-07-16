@@ -2,7 +2,7 @@
 // über das lokale LLM (dasselbe wie die nächtliche Generierung).
 
 import { computeNetRates, totalHousing, currentEpoch } from '../engine/tick.js';
-import { chatCompletion } from './generator.js';
+import { chatCompletion, chatCompletionStream } from './generator.js';
 import { llmSafeName } from '../content/loader.js';
 
 /** Kompakte, für Beratung relevante Momentaufnahme des Spielstands. */
@@ -102,7 +102,21 @@ export async function askAdvisor(question, ctx) {
   ];
   // Kleines Budget: 4-Sätze-Antworten brauchen keine 12k Tokens — spart
   // GPU-Zeit, wenn parallel die Nacht-Generierung läuft. (Reasoning-Puffer inkl.)
-  const raw = await chatCompletion({ ...ctx.config.llm, maxTokens: Math.min(ctx.config.llm.maxTokens, 2048), temperature: 0.4 }, messages);
+  const raw = await chatCompletion({ ...ctx.config.llm, model: ctx.config.llm.modelChat || ctx.config.llm.model, maxTokens: Math.min(ctx.config.llm.maxTokens, 6144), temperature: 0.4 }, messages);
   // Reasoning-Modelle liefern manchmal <think>…</think> voran — entfernen
   return String(raw).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
+
+/** E: Streaming-Variante — Antwort tokenweise (für SSE), <think> wird gefiltert. */
+export async function askAdvisorStream(question, ctx, onToken) {
+  const data = snapshot(ctx);
+  const messages = [
+    { role: 'system', content: SYSTEM },
+    { role: 'user', content: `Spieldaten (JSON):\n${JSON.stringify(data)}\n\nFrage des Spielers: ${question}` },
+  ];
+  return chatCompletionStream(
+    { ...ctx.config.llm, model: ctx.config.llm.modelChat || ctx.config.llm.model, maxTokens: Math.min(ctx.config.llm.maxTokens, 6144), temperature: 0.4 },
+    messages,
+    onToken
+  );
 }

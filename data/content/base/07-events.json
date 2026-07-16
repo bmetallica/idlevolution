@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "pack": {
+    "id": "base-events",
+    "source": "human"
+  },
+  "events": [
+    {
+      "id": "storm",
+      "name": { "de": "Sturm", "en": "Storm" },
+      "description": { "de": "Ein Unwetter fegt über die Insel — die Holzfäller kommen kaum voran." },
+      "icon": "🌩️",
+      "epoch": "stone_age",
+      "durationTicks": 1440,
+      "modifiers": { "production": { "wood": 0.85 } }
+    },
+    {
+      "id": "harvest_festival",
+      "name": { "de": "Erntefest", "en": "Harvest Festival" },
+      "description": { "de": "Die Siedlung feiert eine reiche Ernte — alle packen mit an." },
+      "icon": "🎉",
+      "epoch": "stone_age",
+      "durationTicks": 1440,
+      "modifiers": { "production": { "food": 1.15 }, "grant": { "food": 60 } }
+    },
+    {
+      "id": "market_day",
+      "name": { "de": "Markttag", "en": "Market Day" },
+      "description": { "de": "Händler aus allen Richtungen beleben die Insel — die Wirtschaft brummt." },
+      "icon": "🛒",
+      "epoch": "bronze_age",
+      "durationTicks": 720,
+      "modifiers": { "production": { "*": 1.1 } }
+    },
+    {
+      "id": "rich_vein",
+      "name": { "de": "Reiche Ader", "en": "Rich Vein" },
+      "description": { "de": "Die Bergleute stoßen auf eine ergiebige Gesteinsader." },
+      "icon": "⛏️",
+      "epoch": "bronze_age",
+      "durationTicks": 1440,
+      "modifiers": { "production": { "stone": 1.2 } }
+    },
+    {
+      "id": "fog",
+      "name": { "de": "Dichter Nebel", "en": "Dense Fog" },
+      "description": { "de": "Nebel legt sich über die Küste — Fischer und Sammler tasten sich voran." },
+      "icon": "🌫️",
+      "epoch": "stone_age",
+      "durationTicks": 720,
+      "modifiers": { "production": { "food": 0.9 } }
+    }
+  ]
+}

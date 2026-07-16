@@ -18,6 +18,16 @@
   $: chronicle = packs.filter((p) => p.chronicle?.de).map((p) => ({ id: p.id, date: p.createdAt, text: p.chronicle.de })).reverse();
   $: aiPacks = packs.filter((p) => p.source === 'ai').slice().reverse();
 
+  // C4: Nightly-Telemetrie — Akzeptanz-Quote, letzter Lauf, Clamp-Notizen.
+  // Macht auch einen still gestorbenen ai-worker sofort sichtbar (> 26 h kein Lauf).
+  $: telemetry = (() => {
+    if (!runs.length) return null;
+    const ageH = (Date.now() - new Date(runs[0].started_at).getTime()) / 3600000;
+    const ok = runs.filter((r) => r.status === 'accepted' || r.status === 'partial').length;
+    const clamps = runs.flatMap((r) => r.accepted?.notes || []).slice(0, 3);
+    return { ageH: Math.round(ageH * 10) / 10, ok, total: runs.length, stale: ageH > 26, clamps };
+  })();
+
   const fmt = (d) => { try { return new Date(d).toLocaleString('de-DE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
   const fmtDay = (d) => { try { return new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: 'short' }); } catch { return ''; } };
   const statusColor = (s) => (s === 'accepted' ? 'text-emerald-300' : s === 'partial' ? 'text-amber-300' : s === 'rejected' ? 'text-red-300' : 'text-stone-400');
@@ -66,6 +76,22 @@
       {:else if runs.length === 0}
         <p class="text-xs text-stone-600 italic">Noch keine KI-Läufe protokolliert.</p>
       {:else}
+        {#if telemetry}
+          <div class="mb-2 rounded border {telemetry.stale ? 'border-red-800 bg-red-950/30' : 'border-stone-800 bg-stone-950/60'} px-2 py-1.5 text-[11px]">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="{telemetry.stale ? 'text-red-300' : 'text-stone-300'}">
+                {telemetry.stale ? '🔴' : '🟢'} letzter Lauf vor <b>{telemetry.ageH} h</b>
+              </span>
+              <span class="text-stone-400">· Quote: <b class="{telemetry.ok / telemetry.total >= 0.7 ? 'text-emerald-300' : 'text-amber-300'}">{Math.round((telemetry.ok / telemetry.total) * 100)} %</b> akzeptiert ({telemetry.ok}/{telemetry.total})</span>
+            </div>
+            {#if telemetry.stale}
+              <div class="text-red-300/90 mt-0.5">ai-worker prüfen: <code>docker compose ps ai-worker</code></div>
+            {/if}
+            {#if telemetry.clamps.length}
+              <div class="text-stone-500 mt-0.5" title="Werte, die der Balancer zuletzt gekappt hat">✂ {telemetry.clamps[0]}</div>
+            {/if}
+          </div>
+        {/if}
         <div class="space-y-2">
           {#each runs as r (r.id)}
             <div class="rounded border border-stone-800 bg-stone-950/50 p-2">

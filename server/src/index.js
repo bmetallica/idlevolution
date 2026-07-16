@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { pool, migrate } from './db/index.js';
@@ -18,7 +19,10 @@ import contentRoutes from './routes/content.js';
 import aiRoutes from './routes/ai.js';
 import onlineRoutes from './routes/online.js';
 
-const fastify = Fastify({ logger: { level: 'info' } });
+// disableRequestLogging: der Client pollt /api/state alle 2 s + /api/players alle
+// 3 s — ohne das würde jeder Poll eine Info-Zeile erzeugen (Docker-Log läuft voll).
+// Fehler/5xx werden weiterhin geloggt.
+const fastify = Fastify({ logger: { level: 'info' }, disableRequestLogging: true });
 const log = fastify.log;
 
 // ── Bootstrap: DB → Content → Spielzustand → Offline-Aufholung ──
@@ -88,7 +92,41 @@ if (staleDecl) {
 const ctx = { config, pool, registryHolder, world, players, human, state: human, game, balance };
 fastify.decorate('gameCtx', ctx);
 
-fastify.get('/healthz', async () => ({ ok: true, tick: human.tick }));
+// E: Optionaler GAME_TOKEN — schützt schreibende Spiel-Endpunkte, falls je ein
+// Port ins Internet zeigt. /api/ai/* und die nightly-Endpunkte prüfen weiterhin
+// ihren eigenen AI_IMPORT_TOKEN (der ai-worker kennt den GAME_TOKEN nicht).
+if (config.gameToken) {
+  const ownToken = ['/api/ai/', '/api/war/resolve', '/api/players/plan'];
+  fastify.addHook('preHandler', async (req, reply) => {
+    if (req.method !== 'POST' || !req.url.startsWith('/api/')) return;
+    if (ownToken.some((p) => req.url.startsWith(p))) return;
+    if (req.headers['x-game-token'] !== config.gameToken) {
+      reply.code(401);
+      return reply.send({ ok: false, error: 'x-game-token erforderlich (GAME_TOKEN ist gesetzt)' });
+    }
+  });
+  log.info('GAME_TOKEN aktiv — schreibende Spiel-API verlangt x-game-token');
+}
+
+// /healthz mit Betriebsdaten: eine Zeile für Monitoring (C4). Der ai-worker-
+// Heartbeat verrät auch hier, ob der nächtliche Scheduler noch lebt.
+fastify.get('/healthz', async () => {
+  let aiWorkerBeatAgeS = null;
+  try {
+    const { mtimeMs } = await stat(path.join(config.dataDir, 'ai-worker.heartbeat'));
+    aiWorkerBeatAgeS = Math.floor((Date.now() - mtimeMs) / 1000);
+  } catch { /* Datei fehlt → Worker lief noch nie */ }
+  return {
+    ok: true,
+    tick: human.tick,
+    uptimeS: Math.floor(process.uptime()),
+    players: players.filter((p) => p.active !== false).length,
+    epoch: human.epochId,
+    population: Math.floor(human.population),
+    aiWorkerBeatAgeS,
+    aiWorkerAlive: aiWorkerBeatAgeS != null && aiWorkerBeatAgeS < 180,
+  };
+});
 await fastify.register(gameRoutes);
 await fastify.register(contentRoutes);
 await fastify.register(aiRoutes);

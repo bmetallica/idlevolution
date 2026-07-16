@@ -31,12 +31,15 @@ services:
       PERSIST_EVERY_TICKS: ${PERSIST_EVERY_TICKS:-12}
       OFFLINE_CAP_HOURS: ${OFFLINE_CAP_HOURS:-24}
       AI_IMPORT_TOKEN: ${AI_IMPORT_TOKEN:?AI_IMPORT_TOKEN muss in .env gesetzt sein}
-      # LLM für den In-Game-Berater (/api/assist)
+      # LLM für den In-Game-Berater (/api/assist), Strategist und Tagesziele
       LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:8080}
       LLM_MODEL: ${LLM_MODEL:-gemma4-12b}
+      LLM_MODEL_CHAT: ${LLM_MODEL_CHAT:-}
       LLM_CTX: ${LLM_CTX:-32768}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-12288}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
+      # Optionaler Schreibschutz der Spiel-API (x-game-token); leer = aus
+      GAME_TOKEN: ${GAME_TOKEN:-}
     volumes:
       - ./data:/data
     healthcheck:
@@ -62,6 +65,7 @@ services:
       # LLM-Server (llama.cpp / llama-swap, OpenAI-kompatible API)
       LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:8080}
       LLM_MODEL: ${LLM_MODEL:-gemma4-12b}
+      LLM_MODEL_NIGHTLY: ${LLM_MODEL_NIGHTLY:-}
       LLM_CTX: ${LLM_CTX:-32768}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-12288}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
@@ -70,6 +74,16 @@ services:
       AI_RUN_ON_START: ${AI_RUN_ON_START:-false}
     volumes:
       - ./data:/data
+    # C4: Watchdog — der Scheduler schreibt alle 60 s einen Heartbeat nach /data.
+    # Bleibt die Datei > 3 min alt, gilt der Worker als tot (restart: unless-stopped
+    # startet ihn dann zwar nicht automatisch neu, aber `docker compose ps` und
+    # Monitoring sehen den Zustand sofort).
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const s=require('fs').statSync('/data/ai-worker.heartbeat'); if (Date.now()-s.mtimeMs>180000) process.exit(1)\""]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 volumes:
   pgdata:

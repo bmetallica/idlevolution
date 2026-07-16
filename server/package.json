@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "balance:report": "node scripts/balance-report.js"
   },
   "dependencies": {
     "@fastify/static": "^7.0.4",

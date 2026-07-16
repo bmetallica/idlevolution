@@ -229,5 +229,42 @@ export function balancePack(pack, registry, balance) {
     return true;
   });
 
+  // ── D1: Events — temporäre Modifikatoren eng deckeln (±20 %, ≤ 1 Tag) ──
+  // Events sind die gefahrlose Spielwiese der Nacht-KI: selbst ein schlechtes
+  // Event richtet nur begrenzten, TEMPORÄREN Schaden an. Die Deckel garantieren das.
+  const evMin = balance.eventMultiplierRange?.[0] ?? 0.8;
+  const evMax = balance.eventMultiplierRange?.[1] ?? 1.2;
+  const evMaxDuration = balance.eventMaxDurationTicks ?? 17280; // 1 Tag
+  const evMaxGrantValue = balance.eventMaxGrantValue ?? 200; // Warenwert des Start-Geschenks
+  out.events = (out.events || []).filter((ev) => {
+    const referenced = [...Object.keys(ev.modifiers?.production || {}), ...Object.keys(ev.modifiers?.grant || {})];
+    if (referenced.some((rid) => !stillExists(rid)) || (ev.epoch && rejectedEpochIds.has(ev.epoch))) {
+      rejected.push({ type: 'event', id: ev.id, reason: 'referenziert ein abgelehntes Item' });
+      return false;
+    }
+    const d = clamp(Math.round(ev.durationTicks) || 720, 1, evMaxDuration);
+    if (d !== ev.durationTicks) { notes.push(`Event '${ev.id}': durationTicks → ${d}`); ev.durationTicks = d; }
+    for (const [rid, m] of Object.entries(ev.modifiers?.production || {})) {
+      const c = clamp(m, evMin, evMax);
+      if (c !== m) { notes.push(`Event '${ev.id}': production.${rid} ${m} → ${c} gekappt`); ev.modifiers.production[rid] = c; }
+    }
+    if (ev.modifiers?.grant) {
+      let grantValue = valueOf(ev.modifiers.grant, lookupValue);
+      for (const [rid, amount] of Object.entries(ev.modifiers.grant)) {
+        if (!(amount > 0)) { delete ev.modifiers.grant[rid]; continue; } // kein Abzug, kein Unfug
+      }
+      grantValue = valueOf(ev.modifiers.grant, lookupValue);
+      if (grantValue > evMaxGrantValue) {
+        const scale = evMaxGrantValue / grantValue;
+        for (const rid of Object.keys(ev.modifiers.grant)) {
+          ev.modifiers.grant[rid] = Math.max(1, Math.floor(ev.modifiers.grant[rid] * scale));
+        }
+        notes.push(`Event '${ev.id}': grant auf Warenwert ${evMaxGrantValue} skaliert`);
+      }
+    }
+    return true;
+  });
+  if (Array.isArray(out.events) && out.events.length === 0) delete out.events;
+
   return { pack: out, rejected, notes };
 }

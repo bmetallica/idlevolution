@@ -13,10 +13,18 @@ export const config = {
   offlineCapHours: num(process.env.OFFLINE_CAP_HOURS, 24),
 
   aiImportToken: process.env.AI_IMPORT_TOKEN || '',
+  // E: Optionaler Schreibschutz der Spiel-API (Standard: aus, LAN bleibt frei).
+  // Gesetzt → alle schreibenden /api-Aufrufe brauchen den Header x-game-token.
+  gameToken: process.env.GAME_TOKEN || '',
 
   llm: {
     baseUrl: (process.env.LLM_BASE_URL || 'http://localhost:8080').replace(/\/$/, ''),
     model: process.env.LLM_MODEL || 'gemma4-12b',
+    // D4: Modell-Routing pro Rolle — llama-swap kann mehrere Modelle hosten.
+    // Nightly = groß/Qualität (Latenz egal), Chat = klein/schnell (Advisor, Strategist).
+    // Ohne die Env-Variablen bleibt alles beim Standard-Modell.
+    modelNightly: process.env.LLM_MODEL_NIGHTLY || process.env.LLM_MODEL || 'gemma4-12b',
+    modelChat: process.env.LLM_MODEL_CHAT || process.env.LLM_MODEL || 'gemma4-12b',
     ctx: num(process.env.LLM_CTX, 32768),
     // Großzügig: Reasoning-Modelle (z.B. Gemma 4) verbrauchen viele Tokens fürs Denken,
     // bevor der eigentliche JSON-Content kommt.

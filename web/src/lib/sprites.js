@@ -363,21 +363,26 @@ const spriteCache = new Map();
 const SIDE_PAD = TILE_W * 0.7, TOP_PAD = 150, BOT_PAD = 16;
 
 /** Liefert ein gecachtes Bitmap eines fertigen Gebäudes + Ankerversatz (ax, ay).
- *  w,h = bereits gedrehte Grundfläche; rot steuert die Türseite. */
-export function getBuildingSprite(def, epochOrder, w, h, rot = 0) {
-  const key = `${def.id}|${epochOrder}|${w}x${h}|${rot}`;
+ *  w,h = bereits gedrehte Grundfläche; rot steuert die Türseite. `scale` bäckt
+ *  das Sprite in physischer Auflösung (devicePixelRatio) → scharf auf HiDPI;
+ *  ax/ay/w/h bleiben in logischen Pixeln (Aufrufer zeichnet mit Ziel-Größe w×h). */
+export function getBuildingSprite(def, epochOrder, w, h, rot = 0, scale = 1) {
+  const key = `${def.id}|${epochOrder}|${w}x${h}|${rot}|${scale}`;
   let s = spriteCache.get(key);
   if (s) return s;
   const canvas = document.createElement('canvas');
   const ax = h * (TILE_W / 2) + SIDE_PAD, ay = TOP_PAD;
-  canvas.width = Math.ceil((w + h) * (TILE_W / 2) + 2 * SIDE_PAD);
-  canvas.height = Math.ceil(TOP_PAD + (w + h - 1) * (TILE_H / 2) + BOT_PAD);
+  const cw = Math.ceil((w + h) * (TILE_W / 2) + 2 * SIDE_PAD);
+  const ch = Math.ceil(TOP_PAD + (w + h - 1) * (TILE_H / 2) + BOT_PAD);
+  canvas.width = Math.round(cw * scale);
+  canvas.height = Math.round(ch * scale);
   const g = canvas.getContext('2d');
+  g.scale(scale, scale);
   g.translate(ax, ay); // lokaler Ursprung gridToScreen(0,0) → (ax, ay)
   drawStaticInternal(g, def, 0, 0, w, h, epochOrder, rot);
   // In ein ImageBitmap konvertieren: als drawImage-Quelle GPU-resident & ohne
   // Neuübertragung pro Frame (Canvas2D-Quellen sind dafür deutlich langsamer).
-  s = { canvas, bitmap: null, ax, ay };
+  s = { canvas, bitmap: null, ax, ay, w: cw, h: ch };
   spriteCache.set(key, s);
   if (typeof createImageBitmap === 'function') createImageBitmap(canvas).then((bm) => { s.bitmap = bm; }).catch(() => {});
   return s;

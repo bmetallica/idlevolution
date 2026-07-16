@@ -129,6 +129,28 @@ export function llmPackSchema() {
           required: ['id', 'order', 'name'],
         },
       },
+      events: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: idStr,
+            name: i18n,
+            description: i18n,
+            icon: { type: 'string' },
+            epoch: { type: 'string' },
+            durationTicks: { type: 'integer' },
+            modifiers: {
+              type: 'object',
+              properties: {
+                production: numberMap,
+                grant: numberMap,
+              },
+            },
+          },
+          required: ['id', 'name', 'durationTicks', 'modifiers'],
+        },
+      },
       epochAdvance: { type: 'object', additionalProperties: advance },
     },
     required: ['chronicle'],
@@ -143,6 +165,7 @@ Du antwortest AUSSCHLIESSLICH mit einem JSON-Objekt (Content-Pack) mit diesen op
 - "chronicle": { "de": "..." } — PFLICHT: kurzer erzählerischer Tagesbericht (2-4 Sätze, Deutsch), der die neuen Inhalte narrativ einführt.
 - "resources": Array neuer Ressourcen: { id, name:{de,en}, description:{de}, category (raw|processed|food|luxury|special), icon (1 Emoji, thematisch passend und möglichst EINDEUTIG — nicht dasselbe Emoji wie eine bereits existierende Ressource), epoch, baseValue }
 - "buildings": Array neuer Gebäude: { id, name:{de,en}, description:{de}, category (production|storage|housing|civic), epoch, icon (1 Emoji), cost:{ressourceId:menge}, buildTimeTicks, workers, production:{inputs:{},outputs:{}}, storage:{ressourceId:kapazität} oder {"*":kapazität}, housing:{capacity}, requires:{epoch,buildings:{},resources:{},population}, placement:{terrain:["grass"|"sand"], adjacent:{"forest"|"rock"|"water"|"grass": anzahl 1-8}} }
+  FREISCHALTUNG ("requires"): Damit gatest du ein Gebäude hinter Voraussetzungen — "requires.buildings":{"id":anzahl} verlangt, dass der Spieler diese Vorläufer-Gebäude zuerst errichtet (thematische Abfolge!), "requires.resources"/"requires.population"/"requires.epoch" analog. Nutze das, damit fortgeschrittene Anlagen erst nach ihrer plausiblen Vorstufe verfügbar werden (siehe Regel 13).
   Das Spiel hat eine Insel-Karte mit den Terrains grass, sand, forest, rock, water. "placement.terrain" = worauf gebaut wird (Standard: grass), "placement.adjacent" = welches Terrain angrenzen muss (z.B. Mine braucht rock, Fischer braucht water), "placement.size" = Grundfläche {w,h} in Feldern (1-4, Standard 1×1; Lager/Zivilbauten gern 2×1 oder 2×2). Setze IMMER ein glaubwürdiges placement passend zur Funktion des Gebäudes.
   GRAFIK ("meta.art"): Die Engine zeichnet Gebäude prozedural. Wähle mit "meta.art.shape" die passende Silhouette — erlaubt: house, farm, woodcutter, sawmill, gatherer, mine, quarry, smelter (Schmelze/Ofen, glüht), workshop, fishery, harbor (Steg/Kai), market, temple (Kuppel), tower, warehouse, fountain (Brunnen/Becken mit Fontäne). Wähle die Silhouette, die zur FUNKTION passt — ein Brunnen ist "fountain", kein "temple". (Ohne shape wird der Typ automatisch aus Funktion/Name erraten.) Für neue Zeitalter/Materialien kannst du das Aussehen anpassen: "meta.art.accent" = Signaturfarbe (Hex, z.B. "#c94f2a"), "meta.art.wall"/"meta.art.roof" = Wand-/Dachfarbe (Hex) für epochentypische Baustoffe.
   MILITÄR ("meta.military"): Das Spiel hat ein Kriegssystem (Soldaten, Raubzüge, Verteidigung). Du darfst epochentypische WEHRANLAGEN einführen (category "civic", z.B. Palisade → Steinmauer → Bastion): "meta.military.defense" = Verteidigungswert (10–15 × Epochen-Order, workers 0, shape "tower"). Selten einsetzen (höchstens 1 je Pack, nur wenn die Epoche noch keine hat).
@@ -150,6 +173,7 @@ Du antwortest AUSSCHLIESSLICH mit einem JSON-Objekt (Content-Pack) mit diesen op
     • "modifiers": { "productionMultiplier": (steigt je Epoche, z.B. +0.2 gegenüber der Vorepoche), "populationGrowth": (klein, z.B. 0.012–0.02) }
     • "tier": { "name": {de,en} } = wie die Bevölkerung dieser Stufe heißt (Steinzeit "Jäger & Sammler" → "Siedler" → "Bürger" → …).
     • "needs": { ressourceId: mengeProKopfProTick } = 1–3 Güter, welche die Bevölkerung dieser Ära zum Zufriedensein verlangt. KRITISCH: Der Wert skaliert PRO KOPF, die Produktion aber pro Gebäude — rechne die GESAMTE Vorkette in Arbeitern je Einheit/Tick durch (Gebäude-workers/outputRate + Vorprodukte)! Ein Gut mit tiefer Kette (z.B. Stahlwaren: Erz→Barren→Stahl→Ware ≈ 100 Arbeiter je Einheit/Tick) verträgt höchstens 0.001–0.002 pro Kopf; nur flache Ketten (1 Gebäude) vertragen 0.005–0.01. Faustregel: needWert × KettenArbeiterkosten ≤ 0.15 (max. 15 % der Bevölkerung arbeiten für EIN Bedürfnis). Zu hohe Werte werden automatisch gekappt. Führe für JEDES need-Gut auch einen Produzenten ein (in diesem Pack neu oder bereits existierend), sonst stagniert die Ära.
+- "events": Array neuer Tages-Ereignisse (0-2 pro Pack): { id, name:{de,en}, description:{de}, icon (1 Emoji), epoch (ab welcher Epoche es auftreten kann), durationTicks (720=1h bis 17280=1Tag), modifiers:{ production:{ressourceId oder "*": faktor 0.8-1.2}, grant:{ressourceId: menge} } }. Ereignisse sind TEMPORÄR und harmlos — kleine Stimmungs-Momente („Sturm: Holz ×0.85 für 2h", „Erntefest: Nahrung ×1.15 + 60 Nahrung geschenkt"). Erfinde thematisch zur Epoche passende Ereignisse (Seuche/Komet/Messe/Streik/Sonnenwende …).
 - "epochAdvance": { "<epochen-id>": {resources:{},buildings:{},population} } — Aufstiegsbedingung für eine existierende Epoche, die noch keine hat. PFLICHT, wenn du eine neue Epoche anlegst.
 
 HARTE REGELN:
@@ -164,7 +188,11 @@ HARTE REGELN:
 9. Baue sinnvolle Produktionsketten: neue Ressourcen brauchen Produzenten, verarbeitende Gebäude brauchen existierende Inputs. SELBST-CHECK vor der Ausgabe: Gehe jeden "inputs"-Eintrag JEDES neuen Gebäudes sowie jedes "needs"-Gut durch — für JEDE dieser Ressourcen MUSS es einen Produzenten geben (ein Gebäude mit dieser Ressource in "outputs"), entweder bereits im Spielstand oder als NEUES Gebäude in DIESEM Pack. Verbrauchst du z.B. "wool", dann liefere im selben Pack auch das Gebäude, das "wool" produziert (z.B. eine Schäferei). Gibt es keinen Produzenten, lasse das Gebäude/need WEG. Unerreichbare Inputs führen zur Ablehnung.
 10. Beachte die "recentRejections" im Spielstand: wiederhole abgelehnte Fehler nicht.
 11. VIELFALT & TERRAIN: Nutze das Terrain thematisch — Fischer/Häfen an "water" (placement.adjacent {water}), Minen/Steinbrüche an "rock", Förster/Jäger an "forest", Farmen/Gärten auf "grass". Variiere die Gebäude-Typen (unterschiedliche meta.art.shape statt immer "workshop").
-12. WOHNEN & KOMFORT: Führe pro neuer Epoche mindestens ein besseres Wohngebäude ein (mehr housing.capacity als die Vorepoche) sowie 1-2 "luxury"-Güter (Komfortwaren), die als Epochen-"needs" die Zufriedenheit der höheren Bevölkerungsstufe tragen — mit passenden Produzenten.`;
+12. WOHNEN & KOMFORT: Führe pro neuer Epoche mindestens ein besseres Wohngebäude ein (mehr housing.capacity als die Vorepoche) sowie 1-2 "luxury"-Güter (Komfortwaren), die als Epochen-"needs" die Zufriedenheit der höheren Bevölkerungsstufe tragen — mit passenden Produzenten.
+13. THEMATISCHE KONTINUITÄT & PLAUSIBLE ABFOLGE: Ein fortgeschrittenes Gut darf nicht "aus dem Nichts" entstehen — es braucht eine glaubwürdige Vorstufe, die der Spieler vorher errichten muss. Modelliere das auf EINE dieser zwei Arten:
+   (a) PRODUKTIONSKETTE — das Gut wird aus einem thematisch passenden Vorprodukt hergestellt. Beispiel: "Satellitendaten" entstehen NICHT direkt in einem Basisgebäude, sondern in einer Bodenstation, die den Rohstoff "Satellit" verbraucht; "Satellit" wiederum baut eine Raketenfabrik aus vorhandener "Elektronik" + "Treibstoff". Die inputs eines neuen Gebäudes sollen konzeptionell zum output passen (Erz→Metall→Werkzeug, nicht Getreide→Mikrochip).
+   (b) FREISCHALT-GATE via "requires.buildings" — das erzeugende Gebäude verlangt zuerst seinen thematischen Vorläufer. Beispiel: bodenstation → requires:{buildings:{raketen_startplatz:1}}. So MUSS der Spieler die Rakete/den Startplatz tatsächlich bauen, bevor er Satellitendaten erntet.
+   MASSVOLL bleiben: 1 nachvollziehbare Zwischenstufe genügt, kein tiefer Techbaum. Ziel ist Logik in der Abfolge (was setzt was voraus?), nicht Bürokratie. SELBST-CHECK: Würde ein Spieler bei diesem neuen Gut fragen „wo kommt das her, das habe ich doch nie aufgebaut?" — dann fehlt die Vorstufe.`;
 
   // Verbotsliste PROMINENT an den Anfang: die häufigste historische Ablehnung
   // war das erneute Anlegen existierender Epochen/IDs — tief in gaps[] vergraben
@@ -176,13 +204,29 @@ HARTE REGELN:
     `- Gebäude: ${(exportData.buildings || []).map((b) => b.id).join(', ') || '—'}`,
   ].join('\n');
 
+  // D4: Themen-Rotation gegen Content-Monotonie — ohne Fokus erfindet ein kleines
+  // Modell gern die x-te Werkstatt-Variante. Der Wochentag rotiert das Themenfeld;
+  // dringende Wirtschaftslücken haben trotzdem Vorrang (steht im Prompt).
+  const THEMES = [
+    'Kultur & Gemeinwesen (Feste, Bildung, Denkmäler)',
+    'Nahrung & Landwirtschaft (neue Nahrungsketten, Veredelung)',
+    'Handwerk & Industrie (Werkstoffe, Verarbeitungsketten)',
+    'Luxus & Handel (Komfortgüter, Marktleben)',
+    'Infrastruktur & Logistik (Lager, Häfen, Versorgung)',
+    'Militär & Verteidigung (epochengerechte Wehranlagen)',
+    'Kuriosum & Wunder (Ungewöhnliches, Ereignisse, kleine Geschichten)',
+  ];
+  const focus = THEMES[new Date().getDay() % THEMES.length];
+
   // Kompaktes JSON (keine Einrückung) — spart ~30 % Tokens gegenüber null,1
   const user = `${existing}
+
+FOKUS-THEMA heute: ${focus} — bevorzuge Inhalte aus diesem Themenfeld, SOFERN die Wirtschaft nichts Dringenderes braucht (gaps zuerst!).
 
 Aktueller Siedlungs-Status (JSON):
 ${JSON.stringify(exportData)}
 
-Analysiere die "gaps" und den Zustand der Wirtschaft. Erzeuge ein Content-Pack mit 1-3 neuen Gebäuden und 0-2 neuen Ressourcen, das die größten Lücken schließt und die nächste Spielphase vorbereitet. Falls der Epochen-Aufstieg nah ist und die Folge-Epoche fehlt oder leer ist, fülle sie. Antworte nur mit dem JSON-Objekt.`;
+Analysiere die "gaps" und den Zustand der Wirtschaft. Erzeuge ein Content-Pack mit 1-3 neuen Gebäuden und 0-2 neuen Ressourcen, das die größten Lücken schließt und die nächste Spielphase vorbereitet. Achte auf THEMATISCHE KONTINUITÄT (Regel 13): baue an das an, was schon existiert, und gib jedem fortgeschrittenen Gut eine nachvollziehbare Vorstufe (Kette oder requires-Gate) — nichts soll entstehen, das der Spieler nie aufgebaut hat. Falls der Epochen-Aufstieg nah ist und die Folge-Epoche fehlt oder leer ist, fülle sie. Antworte nur mit dem JSON-Objekt.`;
 
   return [
     { role: 'system', content: system },
@@ -242,6 +286,84 @@ export async function chatCompletion(llm, messages, responseFormat) {
     throw new Error('leere LLM-Antwort');
   }
   return content;
+}
+
+/**
+ * E: Streaming-Variante (SSE des LLM-Servers konsumieren) — für den Advisor,
+ * damit Antworten tokenweise im Panel erscheinen statt als 30-s-Blackbox.
+ * <think>…</think>-Reasoning wird im Stream unterdrückt (Gemma-Modelle).
+ * @param {(token: string) => void} onToken
+ * @returns {Promise<string>} vollständiger (gefilterter) Text
+ */
+export async function chatCompletionStream(llm, messages, onToken) {
+  const body = {
+    model: llm.model,
+    messages,
+    temperature: llm.temperature,
+    max_tokens: llm.maxTokens,
+    stream: true,
+  };
+  const res = await fetch(`${llm.baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(600000),
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`LLM HTTP ${res.status}: ${text.slice(0, 300)}`);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let full = '';
+  let thinking = false; // innerhalb eines <think>-Blocks → nicht weiterreichen
+  let pending = ''; // Puffer gegen zerteilte <think>-Tags an Chunk-Grenzen
+  const emit = (chunk) => {
+    pending += chunk;
+    // Tags können über Token-Grenzen zerfallen — nur bis zum letzten sicheren Punkt emittieren
+    for (;;) {
+      if (thinking) {
+        const close = pending.indexOf('</think>');
+        if (close === -1) { pending = pending.slice(-10); return; } // Rest verwerfen, Tail für Tag-Erkennung behalten
+        pending = pending.slice(close + 8);
+        thinking = false;
+      } else {
+        const open = pending.indexOf('<think>');
+        if (open === -1) {
+          // alles bis auf einen möglichen Tag-Anfang ausgeben
+          const safe = Math.max(0, pending.length - 7);
+          const out = pending.slice(0, safe);
+          if (out) { full += out; onToken(out); }
+          pending = pending.slice(safe);
+          return;
+        }
+        const out = pending.slice(0, open);
+        if (out) { full += out; onToken(out); }
+        pending = pending.slice(open + 7);
+        thinking = true;
+      }
+    }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') { if (!thinking && pending) { full += pending; onToken(pending); } return full.trim(); }
+      try {
+        const t = JSON.parse(data).choices?.[0]?.delta?.content;
+        if (t) emit(t);
+      } catch { /* halbe JSON-Zeile → nächster Chunk */ }
+    }
+  }
+  if (!thinking && pending) { full += pending; onToken(pending); }
+  return full.trim();
 }
 
 async function completeWithFormats(llm, messages) {

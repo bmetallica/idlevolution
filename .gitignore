@@ -16,6 +16,7 @@ data/exports/
 data/rejected/
 data/backups/
 data/online/
+data/ai-worker.heartbeat
 
 # OS / Editor / Logs
 .DS_Store

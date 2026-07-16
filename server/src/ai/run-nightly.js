@@ -39,9 +39,12 @@ export async function runNightly(log = console) {
     await readFile(path.join(config.dataDir, 'balance.config.json'), 'utf8')
   ).balance;
 
+  // D4: Modell-Routing — die Nacht-Generierung darf das große Qualitäts-Modell nutzen
+  const nightlyLlm = { ...config.llm, model: config.llm.modelNightly || config.llm.model };
+
   let generated;
   try {
-    generated = await generatePack(exportData, config.llm, balance);
+    generated = await generatePack(exportData, nightlyLlm, balance);
     log.info?.(`[nightly] LLM-Antwort erhalten (Format: ${generated.formatUsed})`);
   } catch (err) {
     log.error?.(`[nightly] LLM-Generierung fehlgeschlagen: ${err.message}`);
@@ -51,7 +54,7 @@ export async function runNightly(log = console) {
 
   let result = await api('POST', '/api/ai/import', {
     pack: generated.pack,
-    run: { export: exportData, rawResponse: generated.raw, model: config.llm.model },
+    run: { export: exportData, rawResponse: generated.raw, model: nightlyLlm.model },
   });
 
   // Reparatur-Runde: Bei kompletter Ablehnung bekommt das LLM die konkreten
@@ -60,10 +63,10 @@ export async function runNightly(log = console) {
     const reasons = result.rejected.map((r) => r.reason || String(r)).slice(0, 12);
     log.info?.(`[nightly] Pack abgelehnt (${reasons.length} Gründe) → Reparatur-Runde…`);
     try {
-      const fixed = await repairPack(exportData, config.llm, balance, generated.raw, reasons);
+      const fixed = await repairPack(exportData, nightlyLlm, balance, generated.raw, reasons);
       result = await api('POST', '/api/ai/import', {
         pack: fixed.pack,
-        run: { export: exportData, rawResponse: fixed.raw, model: config.llm.model, repaired: true },
+        run: { export: exportData, rawResponse: fixed.raw, model: nightlyLlm.model, repaired: true },
       });
       log.info?.(`[nightly] Reparatur-Ergebnis: ${result.status}`);
     } catch (err) {
@@ -77,6 +80,14 @@ export async function runNightly(log = console) {
     if (pl?.planning) log.info?.(`[nightly] ${pl.planning} KI-Spieler neu geplant`);
   } catch (err) {
     log.warn?.(`[nightly] KI-Planung übersprungen: ${err.message}`);
+  }
+
+  // E1: Tagesziele für den menschlichen Spieler generieren (LLM → mechanischer Fallback)
+  try {
+    const qs = await api('POST', '/api/quests/generate', {});
+    if (qs?.count) log.info?.(`[nightly] ${qs.count} Tagesziele generiert (${qs.source})`);
+  } catch (err) {
+    log.warn?.(`[nightly] Tagesziele übersprungen: ${err.message}`);
   }
 
   // Kriegssystem (Stufe 6): erklärte Schlachten im Tagesrhythmus auflösen

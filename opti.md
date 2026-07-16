@@ -405,15 +405,51 @@ verifiziert** (keine Spekulation); der Rest ist Design-Weiterdenken.
 
 ### Gesamt-Roadmap v2
 
-**Phase A — Korrektheit sofort:** Besetzungsfaktor (9) · HiDPI (9) ·
-Log-Spam (9) · deploy.sh (13)
-**Phase B — Spielgefühl:** Epochen-Entscheidung (10) · Offline-Bericht (10) ·
-Arbeiter-Panel (10) · Hunger proportional (10)
-**Phase C — Absicherung:** Post-Advance-Sandbox (11) · Langlauftest (11) ·
-balance:report (11) · Watchdog + Telemetrie (12/13)
-**Phase D — Lebendigkeit:** Event-Engine (9) · Sparklines (10) · Sound (10) ·
-Themen-Rotation + Modell-Routing (12)
-**Phase E — Kür:** Quests (10) · Advisor-SSE (12) · Onboarding · PNG-Icons ·
-EpochBanner-Mobile · /api/frame-Bündelung · GAME_TOKEN
-**Blockiert/extern:** Cross-Account-Test (2. GitHub-Account) ·
-`aggression` (User-Entscheid)
+**Phase A — Korrektheit sofort:** ✅ **erledigt** — Besetzungsfaktor (9,
+`staffingFactor` in Deltas+Flows) · HiDPI (9, Backing-Store ×dpr≤2 +
+Bakes/Sprites physisch gebacken) · Log-Spam (9, `disableRequestLogging`) ·
+deploy.sh (13, `scripts/deploy.sh` mit healthz-Gate).
+**Phase B — Spielgefühl:** ✅ **erledigt** — B1 Epochen-Aufstieg als
+Spieler-Entscheidung (advanceReady-Flag im Tick, `POST /api/advance`, Banner-CTA
+mit chainWorkerCost-Vorschau ✓/⚠; KI steigt weiter automatisch) · B2
+Offline-Bericht („Während du weg warst": Δ Pop, Epoche, Kämpfe — localStorage-
+Snapshot) · B3 Arbeiter-Panel (👷: Typ-Zeilen, ±, Balken, „Auto-verteilen" via
+exportiertem autoAssignWorkers, `POST /api/workers/auto`) · B4 Hunger
+proportional (`shortFrac` in tick.js).
+
+**Phase C — Absicherung:** ✅ **erledigt** — Post-Advance-Sandbox (Importer
+simuliert zusätzlich die NÄCHSTE Epoche; Ablehnung bei > 50 % Pop-Verlust) ·
+Ökonomie-Langlauftest (10k Ticks mit Executor, `test/longrun.test.js`) ·
+`npm run balance:report` (Multiplikator-Monotonie, Ketten-Budgets,
+Produzenten-Lücken) · ai-worker-Watchdog (Heartbeat + compose-healthcheck) ·
+Nightly-Telemetrie im 🤖-Panel (Quote, letzter Lauf, Clamps) · `/healthz` mit
+Betriebsdaten.
+
+**Phase D — Lebendigkeit:** ✅ **erledigt** — Event-Engine (toter Contenttyp
+`events` belebt: 1 deterministisches Tages-Ereignis/Spieler, production-Faktor
+je Gut + grant; Balancer-Deckel ±20 %/≤ 1 Tag; 5 Basis-Events; LLM darf Events
+erfinden) · Sparklines (10-h-Ringpuffer Pop/Zufriedenheit/Nahrung im
+EpochBanner) · Sound-Layer (WebAudio synthetisiert: Thud/Münze/Chime/Fehler,
+Mute persistiert) · Themen-Rotation (7 Tages-Foki im Generator-Prompt) ·
+Modell-Routing (`LLM_MODEL_NIGHTLY`/`LLM_MODEL_CHAT`).
+
+**Phase E — Kür:** ✅ **erledigt** (bis auf PNG-Icons) — LLM-Tagesziele
+(🎯 Quests: Chat-Modell schlägt vor, `validateQuests` entscheidet mechanisch,
+Belohnungen rein mechanisch, Fallback-Templates, Claim im EpochBanner) ·
+Advisor-SSE (tokenweises Streaming mit <think>-Filter, Fallback auf klassisch) ·
+Onboarding (5 mechanisch validierte Schritte für junge Siedlungen) ·
+EpochBanner-Mobile (🏛️-Sheet) · `/api/frame` (state+players gebündelt, ein
+2,5-s-Poll statt zwei) · optionaler `GAME_TOKEN` (x-game-token-Header).
+
+**Zusätzlich (Nutzerwunsch, erledigt):** Verschiebe-Werkzeug ✥ (eigenes
+Gebäude umsetzen — `/api/move` mit canPlace/Territorium-Prüfung, IsoMap-Ghost,
+Desktop-Button + Mobile-FAB) · Bau-Palette weicht der Materialleiste dynamisch
+aus (`topOffset` statt fixem `top-12`) · LLM-Kontinuitätsregel 13 (thematische
+Abfolge: Kette oder requires-Gate für fortgeschrittene Güter).
+**Blockiert/extern:** Cross-Account-Test (2. GitHub-Account)
+**Nachgereicht (2026-07-16):** ✅ PNG-Icons — rsvg-convert installiert,
+192/512/apple-touch-180 aus icon.svg gerendert, Manifest + sw.js (Cache v2)
+aktualisiert. ✅ `aggression` AKTIVIERT (User-Entscheid: „voll") —
+`aiConsiderWar` in war.js: aggression > 0.7 + Armee > 2× Ziel-Verteidigung
+→ Raubzug-Erklärung nach der Nacht-Schlacht (max. 1/Nacht je KI, ganztags
+öffentlich sichtbar); Strategist-Prompt informiert das LLM über die Wirkung.

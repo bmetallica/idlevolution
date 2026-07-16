@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher, tick } from 'svelte';
-  import { askAssist } from '../lib/api.js';
+  import { askAssist, askAssistStream } from '../lib/api.js';
 
   const dispatch = createEventDispatcher();
   let question = '';
@@ -18,15 +18,30 @@
   async function send(q) {
     const text = (q ?? question).trim();
     if (!text || busy) return;
-    messages = [...messages, { role: 'user', text }];
+    // E: Streaming — die Antwort wächst live im Panel (statt 30-s-Blackbox)
+    messages = [...messages, { role: 'user', text }, { role: 'ai', text: '' }];
+    const idx = messages.length - 1;
     question = '';
     busy = true;
     await scrollDown();
     try {
-      const r = await askAssist(text);
-      messages = [...messages, { role: 'ai', text: r.answer || '(keine Antwort erhalten)' }];
+      let lastScroll = 0;
+      await askAssistStream(text, (t) => {
+        messages[idx].text += t;
+        messages = messages; // Svelte-Update anstoßen
+        if (Date.now() - lastScroll > 300) { lastScroll = Date.now(); scrollDown(); }
+      });
+      if (!messages[idx].text.trim()) messages[idx].text = '(keine Antwort erhalten)';
+      messages = messages;
     } catch (e) {
-      messages = [...messages, { role: 'error', text: e.message }];
+      // Fallback: klassischer (nicht-streamender) Aufruf
+      try {
+        const r = await askAssist(text);
+        messages[idx] = { role: 'ai', text: r.answer || '(keine Antwort erhalten)' };
+      } catch (e2) {
+        messages[idx] = { role: 'error', text: e2.message };
+      }
+      messages = messages;
     }
     busy = false;
     await scrollDown();

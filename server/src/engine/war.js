@@ -132,6 +132,48 @@ export function resolveWars(world, players, registry, rng = Math.random) {
   return reports;
 }
 
+// ── aggression-Aktivierung (User-Entscheid 2026-07-16: „voll aktivieren") ──
+// Der Strategist erhebt politik.aggression (0..1) seit Stufe 2 — jetzt wird er
+// genutzt: aggressive KIs erklären selbstständig Raubzüge. Leitplanken:
+//  - nur bei aggression > 0.7 (die Persönlichkeit muss es hergeben)
+//  - nur bei KLARER Überlegenheit (Armee > 2× Verteidigung des Ziels) —
+//    wer aufrüstet, wird nicht angegriffen
+//  - max. 1 offene Erklärung je KI (inkl. Vergeltung) → max. 1 Angriff/Nacht
+//  - die Erklärung ist wie beim Menschen ÖFFENTLICH und steht den ganzen Tag
+//    im 🌍-Panel — der Verteidiger hat Zeit zu reagieren
+export const AI_AGGRESSION_THRESHOLD = 0.7;
+export const AI_SUPERIORITY = 2; // Armee muss 2× Verteidigung des Ziels übersteigen
+
+/** Aggressive KIs erwägen nach der Nacht-Schlacht einen Raubzug für die
+ *  KOMMENDE Nacht. @returns {string[]} Berichte fürs Kriegs-Protokoll */
+export function aiConsiderWar(world, players, registry) {
+  const reports = [];
+  for (const p of players) {
+    if (p.kind !== 'ai' || p.active === false) continue;
+    const aggression = p.plan?.policies?.aggression ?? 0;
+    if (aggression < AI_AGGRESSION_THRESHOLD) continue;
+    if ((world.warDeclarations || []).some((d) => d.attackerId === p.id)) continue;
+    const army = armyOf(p);
+    if (army < MIN_RAID_TROOPS) continue;
+    // Schwächstes Ziel wählen — aber nur, wenn die Überlegenheit klar ist
+    const pick = players
+      .filter((t) => t.id !== p.id && t.active !== false)
+      .map((t) => ({ t, def: defenseOf(t, registry) }))
+      .sort((a, b) => a.def - b.def)
+      .find((x) => army > x.def * AI_SUPERIORITY);
+    if (!pick) continue;
+    // 60 % der Armee marschieren, der Rest bleibt zur Heimatverteidigung
+    const troops = Math.max(MIN_RAID_TROOPS, Math.floor(army * 0.6));
+    try {
+      declareWar(world, p, pick.t, troops);
+      reports.push(`⚔️ ${p.name} wittert Beute und erklärt ${pick.t.name} den Raubzug — ${troops} Soldaten marschieren in der kommenden Nacht.`);
+    } catch {
+      // Regeln (Doppel-Erklärung, zu wenig Truppen) → still überspringen
+    }
+  }
+  return reports;
+}
+
 /** Kriegs-Protokoll (geteilte Sicht, lebt in der Welt). */
 export function logWar(world, report, tick) {
   world.warLog ??= [];

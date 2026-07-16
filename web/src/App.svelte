@@ -1,7 +1,12 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte';
-  import { fetchContent, fetchState, fetchMap, build, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, attack, cancelAttack, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt, onlineTrade, onlineTradeOffer, onlineTradeCancel, onlineTradeAccept } from './lib/api.js';
+  import { fetchContent, fetchState, fetchFrame, fetchMap, build, moveInstance, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, attack, cancelAttack, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt, onlineTrade, onlineTradeOffer, onlineTradeCancel, onlineTradeAccept } from './lib/api.js';
   import { buildChainIndex, computeShortages, computeBottlenecks } from './lib/chains.js';
+  import { recordSample, getHistory } from './lib/history.js';
+  import { sfxThud, sfxCoin, sfxError, isMuted, setMuted } from './lib/sound.js';
+
+  let soundMuted = isMuted(); // D3: Mute-Zustand (persistiert)
+  function toggleSound() { soundMuted = !soundMuted; setMuted(soundMuted); }
   import IsoMap from './components/IsoMap.svelte';
   import ResourceBar from './components/ResourceBar.svelte';
   import EpochBanner from './components/EpochBanner.svelte';
@@ -10,6 +15,20 @@
   import Chronicle from './components/Chronicle.svelte';
   import AiAssist from './components/AiAssist.svelte';
   import OnlineSection from './components/OnlineSection.svelte';
+  import WorkerPanel from './components/WorkerPanel.svelte';
+  import Onboarding from './components/Onboarding.svelte';
+
+  // E: Onboarding nur für junge Siedlungen (einmalige Prüfung beim ersten State)
+  let showOnboarding = false;
+  let _onboardingChecked = false;
+  $: if (state && !_onboardingChecked) {
+    _onboardingChecked = true;
+    try { showOnboarding = !localStorage.getItem('onboarded') && Math.floor(state.population) < 50; } catch {}
+  }
+  function dismissOnboarding() {
+    showOnboarding = false;
+    try { localStorage.setItem('onboarded', '1'); } catch {}
+  }
   import { isMobile, portrait } from './lib/device.js';
 
   let topBarH = 48; // gemessene Höhe der Materialleiste → alles darunter weicht dynamisch aus
@@ -73,6 +92,8 @@
   let showChronicle = false;
   let showAssist = false;
   let showPlayers = false;
+  let showWorkers = false; // B3: Arbeiter-Management-Panel
+  let showEpoch = false; // E: Epochen-Panel auf Mobile (Desktop: Banner immer sichtbar)
   let players = null; // { islands, players, freeSlots, maxAi }
   let aiBusy = false;
 
@@ -128,13 +149,13 @@
   async function submitOffer() {
     if (!offGive || !offWant || offGive === offWant || aiBusy) return;
     aiBusy = true;
-    try { await createOffer(offGive, offGiveAmt, offWant, offWantAmt); showFlash('Angebot eingestellt'); await loadMarket(); await pollState(); }
+    try { await createOffer(offGive, offGiveAmt, offWant, offWantAmt); sfxCoin(); showFlash('Angebot eingestellt'); await loadMarket(); await pollState(); }
     catch (e) { showFlash(e.message, false); }
     aiBusy = false;
   }
   async function takeOffer(id) {
     aiBusy = true;
-    try { await acceptOffer(id); showFlash('📦 Angenommen — Schiffe unterwegs'); await loadMarket(); await pollState(); }
+    try { await acceptOffer(id); sfxCoin(); showFlash('📦 Angenommen — Schiffe unterwegs'); await loadMarket(); await pollState(); }
     catch (e) { showFlash(e.message, false); }
     aiBusy = false;
   }
@@ -190,9 +211,55 @@
   ];
   let roadMode = false; // Straßen-Malmodus
   let decoType = null; // 'tree' | 'rock' im Deko-Malmodus
+  let moveMode = false; // Verschiebe-Werkzeug: eigenes Gebäude umsetzen
   let mapComp;
 
   let whatsNew = null; // Zusammenfassung neuer KI-Inhalte seit letztem Besuch
+
+  // ── B2: Offline-Bericht („Während du weg warst") ──
+  // Der Server tickt 24/7 weiter — der Bericht entsteht clientseitig aus einem
+  // localStorage-Snapshot des letzten Besuchs (Δ Bevölkerung, Epoche, Kämpfe).
+  let offlineReport = null;
+  const SNAP_KEY = 'offlineSnapshot';
+  let _snapSavedAt = 0;
+  let _offlineChecked = false;
+  // Snapshot des LETZTEN Besuchs sofort beim Start lesen — der erste Poll
+  // überschreibt ihn sonst, bevor der Bericht ihn auswerten kann.
+  let _bootSnap = null;
+  try { _bootSnap = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null'); } catch {}
+  function saveSnapshot(force = false) {
+    if (!state?.epoch) return;
+    if (!force && Date.now() - _snapSavedAt < 30000) return; // max. alle 30 s schreiben
+    _snapSavedAt = Date.now();
+    try {
+      localStorage.setItem(SNAP_KEY, JSON.stringify({
+        at: Date.now(),
+        population: Math.floor(state.population),
+        epochId: state.epoch.id,
+        epochName: state.epoch.name?.de || state.epoch.id,
+      }));
+    } catch {}
+  }
+  function checkOfflineReport() {
+    if (_offlineChecked || !state?.epoch) return;
+    _offlineChecked = true;
+    const snap = _bootSnap;
+    saveSnapshot(true); // neuer Besuch = neuer Bezugspunkt
+    if (!snap?.at) return;
+    const awayMs = Date.now() - snap.at;
+    if (awayMs < 30 * 60 * 1000) return; // unter 30 min Abwesenheit: kein Bericht
+    const battles = (players?.warLog || []).filter((w) => w.at && new Date(w.at).getTime() > snap.at);
+    const epochChanged = snap.epochId && state.epoch.id !== snap.epochId;
+    offlineReport = {
+      hours: Math.round((awayMs / 3600000) * 10) / 10,
+      dPop: Math.floor(state.population) - (snap.population ?? Math.floor(state.population)),
+      popNow: Math.floor(state.population),
+      epochFrom: epochChanged ? snap.epochName : null,
+      epochTo: epochChanged ? (state.epoch.name?.de || state.epoch.id) : null,
+      battles,
+      advanceReady: !!state.epoch.ready,
+    };
+  }
 
   async function loadContent() {
     try {
@@ -227,12 +294,28 @@
       error = e.message;
     }
   }
+  let history = getHistory().slice(); // D2: Verlaufspuffer (Sparklines im EpochBanner)
+  async function applyState(s) {
+    state = s;
+    error = null;
+    saveSnapshot(); // Bezugspunkt für den Offline-Bericht aktuell halten (gedrosselt)
+    if (recordSample(state)) history = getHistory().slice(); // neue Referenz → Svelte-Update
+    // Insel gewachsen? → Karte neu laden (Terrain re-baked automatisch)
+    if (map && state.mapVersion != null && state.mapVersion !== (map.version ?? 0)) await loadMap();
+  }
   async function pollState() {
     try {
-      state = await fetchState();
-      error = null;
-      // Insel gewachsen? → Karte neu laden (Terrain re-baked automatisch)
-      if (map && state.mapVersion != null && state.mapVersion !== (map.version ?? 0)) await loadMap();
+      await applyState(await fetchState());
+    } catch (e) {
+      error = e.message;
+    }
+  }
+  // E: gebündelter Poll (state + players in einem Request — halbiert die Poll-Last)
+  async function pollFrame() {
+    try {
+      const r = await fetchFrame();
+      players = r.players;
+      await applyState(r.state);
     } catch (e) {
       error = e.message;
     }
@@ -240,6 +323,7 @@
 
   function showFlash(msg, ok = true) {
     flash = { msg, ok };
+    if (!ok) sfxError(); // D3: Fehler hörbar machen (dezent)
     setTimeout(() => (flash = null), 2600);
   }
 
@@ -251,6 +335,7 @@
     }
     try {
       await build(buildingId, x, y, rot ?? 0);
+      sfxThud();
       await pollState();
       // Bau-Modus für Reihenbau aktiv lassen; abbrechen mit ESC/Rechtsklick
     } catch (err) {
@@ -259,8 +344,19 @@
   }
 
   function onSelect(e) {
-    if (buildDef || roadMode || decoType) return; // in Bau-/Straßen-/Deko-Modus keine Auswahl
+    if (buildDef || roadMode || decoType || moveMode) return; // in Bau-/Straßen-/Deko-/Verschiebe-Modus keine Auswahl
     selection = e.detail;
+  }
+
+  async function onMove(e) {
+    const { instanceId, x, y, ok, reason } = e.detail;
+    if (!ok) { showFlash('Hier nicht platzierbar: ' + reason, false); return; }
+    try {
+      await moveInstance(instanceId, x, y);
+      sfxThud();
+      await pollState();
+      showFlash('🏚️ Gebäude verschoben');
+    } catch (err) { showFlash(err.message, false); }
   }
 
   async function onRoad(e) {
@@ -289,6 +385,7 @@
       selection = null;
       roadMode = false;
       decoType = null;
+      moveMode = false;
     } else if ((e.key === 'r' || e.key === 'R') && buildDef) {
       buildRot = (buildRot + 1) % 4; // Gebäude drehen
     }
@@ -297,16 +394,17 @@
   onMount(() => {
     loadContent();
     loadMap();
-    pollState();
-    loadPlayers();
+    // Offline-Bericht braucht state UND players (warLog) vom ersten Laden
+    Promise.all([pollState(), loadPlayers()]).then(checkOfflineReport);
     loadMarket();
     // Polling pausiert im Hintergrund-Tab (Akku/PWA) — beim Zurückkehren sofort auffrischen.
+    // E: state + players kommen gebündelt über /api/frame (ein Request statt zwei).
     const visible = () => !document.hidden;
-    const s = setInterval(() => { if (visible()) pollState(); }, 2000);
+    const s = setInterval(() => { if (visible()) pollFrame(); }, 2500);
     const c = setInterval(() => { if (visible()) loadContent(); }, 60000);
-    // Markt nur pollen, wenn das Panel offen ist (players braucht die Karte für Schiffe immer)
-    const pl = setInterval(() => { if (visible()) { loadPlayers(); if (showMarket) loadMarket(); } }, 3000);
-    const onVis = () => { if (visible()) { pollState(); loadPlayers(); if (showMarket) loadMarket(); } };
+    // Markt nur pollen, wenn das Panel offen ist
+    const pl = setInterval(() => { if (visible() && showMarket) loadMarket(); }, 3000);
+    const onVis = () => { if (visible()) { pollFrame(); if (showMarket) loadMarket(); } };
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('keydown', onKey);
     return () => {
@@ -317,6 +415,16 @@
       window.removeEventListener('keydown', onKey);
     };
   });
+
+  // D1: Toast, wenn ein Tages-Ereignis beginnt (oder beim Laden bereits läuft)
+  let _lastEventId;
+  $: {
+    const ev = state?.activeEvent;
+    if (state && ev?.id !== _lastEventId) {
+      if (ev) showFlash(`${ev.icon} ${ev.name}${ev.description ? ' — ' + ev.description : ''}`);
+      _lastEventId = ev?.id ?? null;
+    }
+  }
 
   $: resourceIndex = Object.fromEntries((content?.resources || []).map((r) => [r.id, r]));
   $: defIndex = Object.fromEntries((content?.buildings || []).map((b) => [b.id, b]));
@@ -346,6 +454,7 @@
       shortages={visiting ? new Set() : shortages}
       roadMode={visiting ? false : roadMode}
       decoType={visiting ? null : decoType}
+      moveMode={visiting ? false : moveMode}
       reticle={$isMobile}
       erase={eraseMode}
       ships={visiting ? [] : players?.ships || []}
@@ -360,6 +469,8 @@
       on:select={onSelect}
       on:road={onRoad}
       on:deco={onDeco}
+      on:move={onMove}
+      on:moveinfo={(e) => showFlash(e.detail.reason, false)}
     />
 
     <!-- Besuchen-Modus: fremde Insel read-only, eigenes HUD ausgeblendet -->
@@ -392,7 +503,13 @@
     <!-- Epochen-Panel oben, rechts neben der Bau-Seitenleiste (Desktop) -->
     {#if !$isMobile}
       <div class="absolute left-[19rem] z-20 w-[min(56vw,560px)]" style="top: {topBarH + 8}px">
-        <EpochBanner {state} epochs={content.epochs} {resourceIndex} buildings={content.buildings} />
+        <EpochBanner {state} {history} epochs={content.epochs} {resourceIndex} buildings={content.buildings} on:changed={(e) => { showFlash(e.detail.msg, e.detail.ok ?? true); pollState(); }} />
+      </div>
+    {:else if showEpoch}
+      <!-- E: Mobile — Epochen-Fortschritt/Aufstieg als Sheet (sonst unsichtbar) -->
+      <div class="mobile-sheet p-2">
+        <div class="flex items-center justify-end"><button class="text-stone-500 hover:text-stone-200 px-2 py-1" on:click={() => (showEpoch = false)}>✕</button></div>
+        <EpochBanner {state} {history} epochs={content.epochs} {resourceIndex} buildings={content.buildings} on:changed={(e) => { showFlash(e.detail.msg, e.detail.ok ?? true); pollState(); }} />
       </div>
     {/if}
 
@@ -403,16 +520,25 @@
         class="border rounded px-3 py-1.5 text-sm {roadMode
           ? 'bg-amber-800 border-amber-500 text-amber-100'
           : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
-        on:click={() => { roadMode = !roadMode; decoType = null; buildDef = null; selection = null; }}
+        on:click={() => { roadMode = !roadMode; decoType = null; buildDef = null; selection = null; moveMode = false; }}
         title="Straßen bauen — auf Wiese/Sand ziehen"
       >
         🛤️
       </button>
       <button
+        class="border rounded px-3 py-1.5 text-sm {moveMode
+          ? 'bg-sky-800 border-sky-500 text-sky-100'
+          : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
+        on:click={() => { moveMode = !moveMode; roadMode = false; decoType = null; buildDef = null; selection = null; }}
+        title="Gebäude verschieben — eigenes Gebäude anklicken, dann Zielfeld anklicken"
+      >
+        ✥
+      </button>
+      <button
         class="border rounded px-3 py-1.5 text-sm {decoType === 'tree'
           ? 'bg-emerald-800 border-emerald-500 text-emerald-100'
           : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
-        on:click={() => { decoType = decoType === 'tree' ? null : 'tree'; roadMode = false; buildDef = null; selection = null; }}
+        on:click={() => { decoType = decoType === 'tree' ? null : 'tree'; roadMode = false; buildDef = null; selection = null; moveMode = false; }}
         title="Bäume pflanzen (Wald-Nachbarschaft) — ziehen setzt, Rechtsklick entfernt/rodet"
       >
         🌲
@@ -421,10 +547,17 @@
         class="border rounded px-3 py-1.5 text-sm {decoType === 'rock'
           ? 'bg-stone-600 border-stone-400 text-stone-100'
           : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
-        on:click={() => { decoType = decoType === 'rock' ? null : 'rock'; roadMode = false; buildDef = null; selection = null; }}
+        on:click={() => { decoType = decoType === 'rock' ? null : 'rock'; roadMode = false; buildDef = null; selection = null; moveMode = false; }}
         title="Felsen setzen (Fels-Nachbarschaft) — ziehen setzt, Rechtsklick entfernt"
       >
         🪨
+      </button>
+      <button
+        class="border rounded px-3 py-1.5 text-sm {showWorkers ? 'bg-emerald-800 border-emerald-500 text-emerald-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
+        on:click={() => (showWorkers = !showWorkers)}
+        title="Arbeiter-Verwaltung — zuweisen, abziehen, Auto-verteilen"
+      >
+        👷
       </button>
       <button
         class="border rounded px-3 py-1.5 text-sm {showPlayers ? 'bg-sky-800 border-sky-500 text-sky-100' : 'bg-stone-900/90 border-stone-700 hover:border-stone-500'}"
@@ -468,6 +601,13 @@
       >
         🎯
       </button>
+      <button
+        class="bg-stone-900/90 border border-stone-700 rounded px-3 py-1.5 text-sm hover:border-stone-500"
+        on:click={toggleSound}
+        title={soundMuted ? 'Ton einschalten' : 'Ton stummschalten'}
+      >
+        {soundMuted ? '🔇' : '🔊'}
+      </button>
     </div>
     {/if}
 
@@ -475,17 +615,20 @@
     {#if $isMobile}
       <!-- Bau-Dock-Umschalter oben links -->
       <div class="absolute top-2 left-2 z-40 safe-top">
-        <button class="mobile-fab {showBuild ? 'active' : ''}" on:click={() => { showBuild = !showBuild; if (showBuild) { roadMode = false; decoType = null; } }} title="Bauen">🏗️</button>
+        <button class="mobile-fab {showBuild ? 'active' : ''}" on:click={() => { showBuild = !showBuild; if (showBuild) { roadMode = false; decoType = null; moveMode = false; } }} title="Bauen">🏗️</button>
       </div>
 
       <!-- Menü-FAB oben rechts (Panels) -->
       <div class="absolute top-2 right-2 z-40 flex flex-col items-end gap-2 safe-top">
         <button class="mobile-fab {mobileMenu ? 'active' : ''}" on:click={() => (mobileMenu = !mobileMenu)} title="Menü">☰</button>
         {#if mobileMenu}
-          <button class="mobile-fab {showPlayers ? 'active' : ''}" on:click={() => { showPlayers = !showPlayers; showMarket = showAssist = showChronicle = false; }} title="Nachbarn">🌍</button>
-          <button class="mobile-fab {showMarket ? 'active' : ''}" on:click={() => { showMarket = !showMarket; showPlayers = showAssist = showChronicle = false; }} title="Markt">🪙</button>
-          <button class="mobile-fab {showAssist ? 'active' : ''}" on:click={() => { showAssist = !showAssist; showPlayers = showMarket = showChronicle = false; }} title="Berater">💬</button>
-          <button class="mobile-fab {showChronicle ? 'active' : ''}" on:click={() => { showChronicle = !showChronicle; showPlayers = showMarket = showAssist = false; }} title="KI-Zentrale">🤖</button>
+          <button class="mobile-fab {showEpoch ? 'active' : ''}" on:click={() => { showEpoch = !showEpoch; showWorkers = showPlayers = showMarket = showAssist = showChronicle = false; }} title="Epoche">🏛️</button>
+          <button class="mobile-fab {showWorkers ? 'active' : ''}" on:click={() => { showWorkers = !showWorkers; showEpoch = showPlayers = showMarket = showAssist = showChronicle = false; }} title="Arbeiter">👷</button>
+          <button class="mobile-fab {showPlayers ? 'active' : ''}" on:click={() => { showPlayers = !showPlayers; showWorkers = showMarket = showAssist = showChronicle = false; }} title="Nachbarn">🌍</button>
+          <button class="mobile-fab {showMarket ? 'active' : ''}" on:click={() => { showMarket = !showMarket; showWorkers = showPlayers = showAssist = showChronicle = false; }} title="Markt">🪙</button>
+          <button class="mobile-fab {showAssist ? 'active' : ''}" on:click={() => { showAssist = !showAssist; showWorkers = showPlayers = showMarket = showChronicle = false; }} title="Berater">💬</button>
+          <button class="mobile-fab {showChronicle ? 'active' : ''}" on:click={() => { showChronicle = !showChronicle; showWorkers = showPlayers = showMarket = showAssist = false; }} title="KI-Zentrale">🤖</button>
+          <button class="mobile-fab" on:click={toggleSound} title={soundMuted ? 'Ton an' : 'Ton aus'}>{soundMuted ? '🔇' : '🔊'}</button>
         {/if}
       </div>
 
@@ -498,9 +641,10 @@
 
         <!-- Bau-Werkzeuge links -->
         <div class="absolute left-2 bottom-4 z-40 flex flex-col gap-2">
-          <button class="mobile-fab {roadMode ? 'active' : ''}" on:click={() => { roadMode = !roadMode; decoType = null; buildDef = null; selection = null; eraseMode = false; }} title="Straßen">🛤️</button>
-          <button class="mobile-fab {decoType === 'tree' ? 'active' : ''}" on:click={() => { decoType = decoType === 'tree' ? null : 'tree'; roadMode = false; buildDef = null; selection = null; eraseMode = false; }} title="Bäume">🌲</button>
-          <button class="mobile-fab {decoType === 'rock' ? 'active' : ''}" on:click={() => { decoType = decoType === 'rock' ? null : 'rock'; roadMode = false; buildDef = null; selection = null; eraseMode = false; }} title="Felsen">🪨</button>
+          <button class="mobile-fab {moveMode ? 'active' : ''}" on:click={() => { moveMode = !moveMode; roadMode = false; decoType = null; buildDef = null; selection = null; eraseMode = false; }} title="Gebäude verschieben">✥</button>
+          <button class="mobile-fab {roadMode ? 'active' : ''}" on:click={() => { roadMode = !roadMode; decoType = null; buildDef = null; selection = null; moveMode = false; eraseMode = false; }} title="Straßen">🛤️</button>
+          <button class="mobile-fab {decoType === 'tree' ? 'active' : ''}" on:click={() => { decoType = decoType === 'tree' ? null : 'tree'; roadMode = false; buildDef = null; selection = null; moveMode = false; eraseMode = false; }} title="Bäume">🌲</button>
+          <button class="mobile-fab {decoType === 'rock' ? 'active' : ''}" on:click={() => { decoType = decoType === 'rock' ? null : 'rock'; roadMode = false; buildDef = null; selection = null; moveMode = false; eraseMode = false; }} title="Felsen">🪨</button>
           {#if roadMode || decoType}
             <button class="mobile-fab {eraseMode ? 'active' : ''}" on:click={() => (eraseMode = !eraseMode)} title="Radieren an/aus">🧹</button>
           {/if}
@@ -545,6 +689,10 @@
       <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-amber-900/90 border border-amber-600 rounded-full px-4 py-1.5 text-sm whitespace-nowrap">
         {decoType === 'tree' ? '🌲 Bäume pflanzen' : '🪨 Felsen setzen'} — ziehen setzt (zählt für {decoType === 'tree' ? 'Wald' : 'Fels'}-Nachbarschaft) · <b>rechts</b> ziehen entfernt{decoType === 'tree' ? '/rodet Wald' : ''} · <kbd>ESC</kbd> beendet
       </div>
+    {:else if moveMode}
+      <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 bg-sky-900/90 border border-sky-600 rounded-full px-4 py-1.5 text-sm whitespace-nowrap">
+        ✥ Verschieben — eigenes Gebäude anklicken (nimmt es auf), dann Zielfeld anklicken · <kbd>ESC</kbd> beendet
+      </div>
     {/if}
 
     {/if}
@@ -580,6 +728,19 @@
             loadContent();
             pollState();
           }}
+        />
+      </div>
+    {/if}
+
+    <!-- B3: Arbeiter-Management-Panel -->
+    {#if showWorkers}
+      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-emerald-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 overflow-y-auto'} style={$isMobile ? '' : `top: ${topBarH + 52}px; max-height: calc(100vh - ${topBarH + 64}px)`}>
+        <WorkerPanel
+          {state}
+          {defIndex}
+          {resourceIndex}
+          on:close={() => (showWorkers = false)}
+          on:changed={(e) => { if (e.detail.msg) showFlash(e.detail.msg, e.detail.ok ?? true); pollState(); }}
         />
       </div>
     {/if}
@@ -811,6 +972,42 @@
       </div>
     {/if}
 
+    <!-- E: Onboarding für Erstspieler (mechanisch validierte Schritte) -->
+    {#if showOnboarding && !visiting && !buildDef}
+      <Onboarding {state} buildings={content.buildings} {resourceIndex} mobile={$isMobile} on:dismiss={dismissOnboarding} />
+    {/if}
+
+    <!-- B2: Offline-Bericht („Während du weg warst") -->
+    {#if offlineReport}
+      <div class="absolute top-24 left-1/2 -translate-x-1/2 z-40 w-[min(92vw,480px)] bg-stone-900/97 backdrop-blur border border-sky-700 rounded-lg shadow-2xl p-4">
+        <div class="flex items-start gap-2">
+          <span class="text-2xl">💤</span>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-sm font-semibold text-sky-100">Während du weg warst <span class="text-stone-500 font-normal">({offlineReport.hours} h)</span></h3>
+            <div class="mt-2 space-y-1 text-xs text-stone-300">
+              <div>
+                {#if offlineReport.dPop > 0}<span class="text-emerald-300">📈 Bevölkerung +{offlineReport.dPop}</span>{:else if offlineReport.dPop < 0}<span class="text-red-300">📉 Bevölkerung {offlineReport.dPop}</span>{:else}<span>👥 Bevölkerung stabil</span>{/if}
+                <span class="text-stone-500"> → jetzt {offlineReport.popNow}</span>
+              </div>
+              {#if offlineReport.epochTo}
+                <div class="text-amber-300">🏛️ Epoche: {offlineReport.epochFrom} → {offlineReport.epochTo}</div>
+              {/if}
+              {#if offlineReport.advanceReady}
+                <div class="text-amber-200">⬆ <b>Epochen-Aufstieg bereit</b> — Details im Epochen-Banner.</div>
+              {/if}
+              {#each offlineReport.battles as b}
+                <div class="text-red-200/90">⚔️ {b.report}</div>
+              {/each}
+              {#if !offlineReport.battles.length && !offlineReport.epochTo && offlineReport.dPop >= 0}
+                <div class="text-stone-500">Ruhige Zeit — die Siedlung hat fleißig weitergearbeitet.</div>
+              {/if}
+            </div>
+            <button class="mt-3 text-xs bg-sky-700 hover:bg-sky-600 rounded px-3 py-1.5 text-white" on:click={() => (offlineReport = null)}>Weiter</button>
+          </div>
+        </div>
+      </div>
+    {/if}
+
     <!-- „Neu über Nacht"-Zusammenfassung -->
     {#if whatsNew}
       <div class="absolute top-28 left-1/2 -translate-x-1/2 z-40 w-[min(92vw,460px)] bg-indigo-950/95 backdrop-blur border border-indigo-700 rounded-lg shadow-2xl p-4">
@@ -833,6 +1030,7 @@
     {#if !visiting && (!$isMobile || showBuild)}
       <BuildPalette
         mobile={$isMobile}
+        topOffset={topBarH + 8}
         buildings={content.buildings}
         {state}
         {resourceIndex}
@@ -843,6 +1041,7 @@
           selection = null;
           roadMode = false;
           decoType = null;
+          moveMode = false;
           buildRot = 0;
           if ($isMobile) showBuild = false; // Dock nach Auswahl schließen → Fadenkreuz frei
         }}

@@ -8,18 +8,24 @@ import {
   assignWorkers,
   currentEpoch,
   computeResourceFlows,
+  advanceEpoch,
 } from '../engine/tick.js';
+import { chainWorkerCost, NEED_BUDGET_SHARE } from '../content/needs.js';
+import { growIslandRegion } from '../engine/world.js';
 import { describeConditions } from '../engine/rules.js';
 import { epochsInOrder } from '../content/loader.js';
 import { logEvent } from '../engine/state.js';
 import { savePlayer, newPlayerOnIsland, saveWorld } from '../engine/players.js';
 import { planTurn } from '../ai/strategist.js';
+import { autoAssignWorkers } from '../ai/executor.js';
+import { validateQuests, fallbackQuests, claimQuest, questProgress } from '../engine/quests.js';
+import { generateQuestIdeas } from '../ai/questgen.js';
 import { createShipment, findHarbor } from '../engine/ships.js';
-import { declareWar, cancelDeclaration, resolveWars, armyOf, defenseOf, logWar } from '../engine/war.js';
+import { declareWar, cancelDeclaration, resolveWars, aiConsiderWar, armyOf, defenseOf, logWar } from '../engine/war.js';
 import { createOffer, acceptOffer, cancelOffer } from '../engine/trade.js';
 import { TERRAIN, setRoad, roadCoverage, footprintOf, canPlace, setDeco } from '../engine/map.js';
 import { ROAD_MAX_BONUS } from '../engine/tick.js';
-import { askAdvisor } from '../ai/advisor.js';
+import { askAdvisor, askAdvisorStream } from '../ai/advisor.js';
 import { rename, mkdir, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -100,16 +106,74 @@ export default async function gameRoutes(fastify) {
         next: nextEpoch ? { id: nextEpoch.id, name: nextEpoch.name } : null,
         progress: describeConditions(epoch.advance, registry, state),
         needs: needsDetail,
+        // B1: Aufstieg ist Spieler-Entscheidung — ready + Vorschau, was der Klick bedeutet.
+        // Vorschau nur im ready-Zustand berechnen (chainWorkerCost ist rekursiv; der
+        // Endpoint wird alle 2 s gepollt).
+        ready: !!nextEpoch && state.advanceReady === nextEpoch.id,
+        preview: (nextEpoch && state.advanceReady === nextEpoch.id) ? (() => {
+          const defs = [...registry.buildings.values()];
+          const pop = Math.max(1, Math.floor(state.population));
+          return {
+            multiplier: {
+              from: epoch.modifiers?.productionMultiplier ?? 1,
+              to: nextEpoch.modifiers?.productionMultiplier ?? 1,
+            },
+            tier: nextEpoch.tier?.name?.de || null,
+            needs: Object.entries(nextEpoch.needs || {}).map(([rid, perPop]) => {
+              const cost = chainWorkerCost(defs, rid);
+              const workersNeeded = pop * perPop * (Number.isFinite(cost) ? cost : Infinity);
+              return {
+                id: rid,
+                name: registry.resources.get(rid)?.name?.de || rid,
+                perPop,
+                needPerTick: Math.round(pop * perPop * 100) / 100,
+                hasProducer: Number.isFinite(cost),
+                workersNeeded: Number.isFinite(workersNeeded) ? Math.ceil(workersNeeded) : null,
+                // leistbar, wenn die Vorkette ≤ 15 % der Bevölkerung bindet (Bedarfs-Invariante)
+                ok: Number.isFinite(workersNeeded) && workersNeeded <= pop * NEED_BUDGET_SHARE,
+              };
+            }),
+            newBuildings: defs
+              .filter((b) => b.epoch === nextEpoch.id)
+              .map((b) => ({ id: b.id, name: b.name?.de || b.id, icon: b.icon || '🏠' })),
+          };
+        })() : null,
       },
       satisfaction: state.satisfaction ?? 1,
       popTrend,
       popReason,
+      // D1: aktives Tages-Ereignis (Toast + Badge im Client)
+      activeEvent: (() => {
+        const a = state.activeEvent;
+        if (!a) return null;
+        const ev = registry.events.get(a.id);
+        if (!ev || state.tick > a.endsAtTick) return null;
+        return {
+          id: a.id,
+          name: ev.name?.de || a.id,
+          icon: ev.icon || '✨',
+          description: ev.description?.de || null,
+          endsInTicks: Math.max(0, a.endsAtTick - state.tick),
+        };
+      })(),
       food: {
         available: Math.round(foodAvail * 10) / 10,
         needPerTick: Math.round(foodNeed * 100) / 100,
         rate: Math.round(foodRate * 1000) / 1000,
         sufficient: foodAvail + 1e-6 >= foodNeed,
       },
+      // E1: Tagesziele mit mechanischem Live-Fortschritt
+      quests: state.quests
+        ? {
+            generatedAt: state.quests.generatedAt,
+            items: (state.quests.items || []).map((q) => ({
+              ...q,
+              ...questProgress(state, q),
+              rewardIcon: registry.resources.get(q.reward?.resourceId)?.icon || '🎁',
+              rewardName: registry.resources.get(q.reward?.resourceId)?.name?.de || q.reward?.resourceId,
+            })),
+          }
+        : null,
       mapVersion: ctx.world?.version ?? state.mapVersion ?? 0,
       roads: [...(state.roads || [])],
       placed: state.placed || {},
@@ -155,6 +219,17 @@ export default async function gameRoutes(fastify) {
     };
   });
 
+  // E: Gebündelter Poll-Endpoint — state + players in EINEM Request (halbiert die
+  // Poll-Requests; auf Mobile/PWA relevant für den Akku). Nutzt intern die beiden
+  // bestehenden Routen (fastify.inject = In-Prozess, kein Netzwerk-Overhead).
+  fastify.get('/api/frame', async () => {
+    const [s, p] = await Promise.all([
+      fastify.inject({ method: 'GET', url: '/api/state' }),
+      fastify.inject({ method: 'GET', url: '/api/players' }),
+    ]);
+    return { state: s.json(), players: p.json() };
+  });
+
   // Statische Weltkarte (Terrain ändert sich nie — einmal laden reicht)
   fastify.get('/api/map', async () => ({
     width: ctx.state.map.width,
@@ -197,6 +272,52 @@ export default async function gameRoutes(fastify) {
     inst.rot = newRot;
     await savePlayer(ctx.pool, st);
     return { ok: true, instanceId: inst.id, rot: newRot };
+  });
+
+  // B1: Bewusster Epochen-Aufstieg (der Tick markiert nur noch advanceReady).
+  // Prüft die Bedingungen erneut und zieht das Inselwachstum nach — exakt wie
+  // der frühere Auto-Aufstieg im Tick-Loop, nur eben auf Klick.
+  fastify.post('/api/advance', async (req, reply) => {
+    const { registry } = ctx.registryHolder;
+    try {
+      const result = advanceEpoch(registry, ctx.state);
+      if (growIslandRegion(ctx.world, ctx.human.islandId)) {
+        const isl = ctx.world.islands.find((i) => i.id === ctx.human.islandId);
+        if (isl) ctx.human.region = { x: isl.x, y: isl.y, w: isl.w, h: isl.h };
+        for (const pl of ctx.players) if (pl.map) { pl.map.tiles = ctx.world.tiles; pl.map.width = ctx.world.width; pl.map.height = ctx.world.height; }
+      }
+      await persistHumanWorld();
+      logEvent(ctx.pool, 'epoch_advance', { ...result, manual: true }).catch(() => {});
+      fastify.log.info(`Epochen-Aufstieg (Spieler-Entscheidung): ${result.from} → ${result.to}`);
+      return { ok: true, ...result };
+    } catch (err) {
+      reply.code(400);
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Platziertes Gebäude verschieben (nur eigene Insel). Body: { instanceId, x, y }.
+  // Prüft die Zielfläche mit canPlace (Instanz selbst aus der Belegung genommen);
+  // Rotation bleibt erhalten. Kosten fallen keine an — reines Umsetzen.
+  fastify.post('/api/move', async (req, reply) => {
+    const { instanceId, x, y } = req.body || {};
+    const { registry } = ctx.registryHolder;
+    const st = ctx.state;
+    const inst = (st.instances || []).find((i) => i.id === Number(instanceId));
+    if (!inst) { reply.code(404); return { ok: false, error: 'Gebäude nicht gefunden' }; }
+    const nx = Number(x), ny = Number(y);
+    if (!Number.isFinite(nx) || !Number.isFinite(ny)) { reply.code(400); return { ok: false, error: 'Ungültiges Zielfeld' }; }
+    if (nx === inst.x && ny === inst.y) return { ok: true, instanceId: inst.id, x: nx, y: ny };
+    const def = registry.buildings.get(inst.buildingId);
+    // Instanz selbst aus der Belegung nehmen, damit ein 1-Feld-Versatz auf sich
+    // selbst nicht als Kollision zählt (überlappende Alt-/Neuposition erlaubt).
+    const without = { ...st, instances: st.instances.filter((i) => i.id !== inst.id) };
+    const check = canPlace(st.map, without, registry, def, nx, ny, inst.rot ?? 0);
+    if (!check.ok) { reply.code(400); return { ok: false, error: 'Hier nicht platzierbar: ' + check.reason }; }
+    inst.x = nx; inst.y = ny;
+    await savePlayer(ctx.pool, st);
+    logEvent(ctx.pool, 'move', { instanceId: inst.id, buildingId: inst.buildingId, x: nx, y: ny }).catch(() => {});
+    return { ok: true, instanceId: inst.id, x: nx, y: ny };
   });
 
   fastify.post('/api/demolish', async (req, reply) => {
@@ -351,6 +472,9 @@ export default async function gameRoutes(fastify) {
     const tok = req.headers['x-ai-token'] || req.body?.token || bearer;
     if (!ctx.config.aiImportToken || tok !== ctx.config.aiImportToken) { reply.code(401); return { ok: false, error: 'nicht autorisiert' }; }
     const reports = resolveWars(ctx.world, ctx.players, ctx.registryHolder.registry);
+    // aggression aktiv: aggressive KIs erklären danach ggf. Raubzüge für die
+    // KOMMENDE Nacht — öffentlich sichtbar, der Verteidiger hat den Tag zum Rüsten.
+    reports.push(...aiConsiderWar(ctx.world, ctx.players, ctx.registryHolder.registry));
     for (const r of reports) logWar(ctx.world, r, ctx.human?.tick ?? 0);
     for (const p of ctx.players) await savePlayer(ctx.pool, p);
     await saveWorld(ctx.pool, ctx.world);
@@ -446,6 +570,77 @@ export default async function gameRoutes(fastify) {
     }
   });
 
+  // ── E1: Tagesziele (Quests) ──
+  // Generierung: nachts vom ai-worker (Token) — oder vom Client, wenn die Ziele
+  // fehlen/älter als 20 h sind (kein Reroll-Farming möglich). LLM liefert nur
+  // Vorschläge; validateQuests/fallbackQuests entscheiden mechanisch.
+  fastify.post('/api/quests/generate', async (req, reply) => {
+    const { registry } = ctx.registryHolder;
+    const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const tok = req.headers['x-ai-token'] || req.body?.token || bearer;
+    const isWorker = ctx.config.aiImportToken && tok === ctx.config.aiImportToken;
+    const ageH = ctx.state.quests?.generatedAt
+      ? (Date.now() - new Date(ctx.state.quests.generatedAt).getTime()) / 3600000
+      : Infinity;
+    if (!isWorker && ageH < 20) {
+      reply.code(429);
+      return { ok: false, error: 'Neue Ziele gibt es täglich (nächtlicher KI-Lauf)' };
+    }
+    let ideas = [];
+    try {
+      ideas = await generateQuestIdeas(ctx);
+    } catch (err) {
+      fastify.log.warn(`Quest-LLM fehlgeschlagen: ${err.message} → mechanischer Fallback`);
+    }
+    let items = validateQuests(ideas, registry, ctx.state, ctx.game);
+    const source = items.length >= 2 ? 'llm' : 'fallback';
+    if (items.length < 2) items = fallbackQuests(registry, ctx.state, ctx.game);
+    ctx.state.quests = { generatedAt: new Date().toISOString(), items };
+    await savePlayer(ctx.pool, ctx.state);
+    logEvent(ctx.pool, 'quests_generated', { count: items.length, source }).catch(() => {});
+    return { ok: true, count: items.length, source };
+  });
+
+  fastify.post('/api/quests/claim', async (req, reply) => {
+    const { registry } = ctx.registryHolder;
+    try {
+      const q = claimQuest(registry, ctx.state, ctx.game, String(req.body?.questId || ''));
+      await savePlayer(ctx.pool, ctx.state);
+      logEvent(ctx.pool, 'quest_claimed', { id: q.id, type: q.type, reward: q.reward }).catch(() => {});
+      return { ok: true, reward: q.reward };
+    } catch (err) {
+      reply.code(400);
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // E: Berater mit Streaming (SSE) — Tokens erscheinen live im Panel statt als
+  // 30-s-Blackbox. Events: data:{"t":"…"} je Token, data:[DONE] am Ende.
+  fastify.post('/api/assist/stream', async (req, reply) => {
+    const question = (req.body?.question || '').toString().slice(0, 500).trim();
+    if (!question) { reply.code(400); return { ok: false, error: 'Frage fehlt' }; }
+    reply.raw.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    try {
+      const full = await askAdvisorStream(question, ctx, (t) => {
+        reply.raw.write(`data: ${JSON.stringify({ t })}\n\n`);
+      });
+      // Reasoning fraß das ganze Budget → als Fehler melden statt still leer enden
+      if (!full || !full.trim()) {
+        reply.raw.write(`data: ${JSON.stringify({ error: 'Keine Antwort erhalten (Token-Budget vom Reasoning aufgebraucht)' })}\n\n`);
+      }
+    } catch (err) {
+      reply.raw.write(`data: ${JSON.stringify({ error: 'Berater nicht erreichbar: ' + err.message })}\n\n`);
+    }
+    reply.raw.write('data: [DONE]\n\n');
+    reply.raw.end();
+    return reply; // Antwort wurde roh geschrieben
+  });
+
   // ── KI-Transparenz: Protokoll der Läufe (öffentlich, read-only) ──
   fastify.get('/api/ai-log', async () => {
     const { rows } = await ctx.pool.query(
@@ -512,6 +707,23 @@ export default async function gameRoutes(fastify) {
     const { registry } = ctx.registryHolder;
     try {
       return { ok: true, ...assignWorkers(registry, ctx.state, buildingId, Number(delta)) };
+    } catch (err) {
+      reply.code(400);
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // B3: Freie Arbeiter automatisch verteilen — dieselbe kettenbewusste Logik,
+  // mit der die KI ihre Inseln besetzt (Nahrung → Bedarfs-Kette → Bau → Rest).
+  fastify.post('/api/workers/auto', async (req, reply) => {
+    const { registry } = ctx.registryHolder;
+    try {
+      const before = Object.fromEntries(Object.entries(ctx.state.buildings).map(([id, b]) => [id, b.workers ?? 0]));
+      autoAssignWorkers(registry, ctx.state);
+      let placed = 0;
+      for (const [id, b] of Object.entries(ctx.state.buildings)) placed += Math.max(0, (b.workers ?? 0) - (before[id] ?? 0));
+      await savePlayer(ctx.pool, ctx.state);
+      return { ok: true, placed };
     } catch (err) {
       reply.code(400);
       return { ok: false, error: err.message };
