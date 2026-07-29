@@ -4,6 +4,8 @@
 
 // Vereinfachtes Schema für die LLM-Grammatik (ohne $refs/propertyNames, die
 // llama.cpp's json-schema-to-grammar nicht zuverlässig unterstützt).
+import { BUILDING_SHAPES } from '../content/shapes.js';
+
 const numberMap = { type: 'object', additionalProperties: { type: 'number' } };
 // ID-Form schon in der Grammatik erzwingen — eliminiert eine ganze Fehlerklasse
 // an der Quelle. Unterstützt eine llama.cpp-Version das Pattern nicht, greift
@@ -19,8 +21,16 @@ const advance = {
   properties: { resources: numberMap, buildings: numberMap, population: { type: 'number' } },
 };
 
-export function llmPackSchema() {
-  return {
+/**
+ * @param {object} [opts]
+ * @param {boolean} [opts.allowEpochs] Epochen-Feld überhaupt anbieten. Aus, wenn der
+ *   Aufstieg noch fern ist — das Modell legte sonst reihenweise existierende Epochen
+ *   erneut an (mit 16 Nennungen der häufigste Ablehnungsgrund überhaupt). Was nicht
+ *   im Schema steht, kann die Grammatik nicht erzeugen.
+ * @param {number} [opts.nextOrder] Einzig zulässige order einer neuen Epoche.
+ */
+export function llmPackSchema({ allowEpochs = true, nextOrder } = {}) {
+  const schema = {
     type: 'object',
     properties: {
       chronicle: {
@@ -90,7 +100,7 @@ export function llmPackSchema() {
                 art: {
                   type: 'object',
                   properties: {
-                    shape: { type: 'string' },
+                    shape: { enum: BUILDING_SHAPES },
                     accent: { type: 'string' },
                     wall: { type: 'string' },
                     roof: { type: 'string' },
@@ -112,7 +122,9 @@ export function llmPackSchema() {
           type: 'object',
           properties: {
             id: idStr,
-            order: { type: 'integer' },
+            // Genau EIN zulässiger Wert — so kann die Grammatik keine bereits
+            // vergebene order mehr erzeugen.
+            order: nextOrder != null ? { const: nextOrder } : { type: 'integer' },
             name: i18n,
             description: i18n,
             advance,
@@ -155,9 +167,37 @@ export function llmPackSchema() {
     },
     required: ['chronicle'],
   };
+  if (!allowEpochs) {
+    delete schema.properties.epochs;
+    delete schema.properties.epochAdvance;
+  }
+  return schema;
 }
 
-export function buildMessages(exportData, balance) {
+/**
+ * Ist ein Epochen-Aufstieg nah genug, um eine neue Epoche generieren zu lassen?
+ * Nur dann wird das Feld überhaupt angeboten (siehe llmPackSchema).
+ */
+export function epochsWelcome(exportData) {
+  const epochs = exportData?.allEpochs || [];
+  if (!epochs.length) return true;
+  const last = epochs.reduce((a, b) => (b.order > a.order ? b : a), epochs[0]);
+  const cur = exportData?.epoch?.order ?? 0;
+  // Die letzte Epoche ist erreicht → es gibt nichts mehr, worauf man aufsteigen könnte
+  return cur >= last.order;
+}
+
+/** Nächste freie Epochen-order (die einzige, die ein Pack belegen darf). */
+export function nextEpochOrder(exportData) {
+  const epochs = exportData?.allEpochs || [];
+  return epochs.reduce((m, e) => Math.max(m, e.order ?? 0), -1) + 1;
+}
+
+export function buildMessages(exportData, balance, opts = {}) {
+  // Ist der Aufstieg fern, wird das Epochen-Thema komplett aus dem Prompt
+  // genommen — passend zum Schema, das das Feld dann gar nicht erst anbietet.
+  const allowEpochs = opts.allowEpochs ?? epochsWelcome(exportData);
+  const nextOrder = opts.nextOrder ?? nextEpochOrder(exportData);
   const system = `Du bist der Content-Designer eines datengetriebenen Idle-Aufbauspiels (Stil: Anno).
 Du erweiterst das Spiel jede Nacht um neue Inhalte, die zum aktuellen Spielstand passen.
 
@@ -169,12 +209,13 @@ Du antwortest AUSSCHLIESSLICH mit einem JSON-Objekt (Content-Pack) mit diesen op
   Das Spiel hat eine Insel-Karte mit den Terrains grass, sand, forest, rock, water. "placement.terrain" = worauf gebaut wird (Standard: grass), "placement.adjacent" = welches Terrain angrenzen muss (z.B. Mine braucht rock, Fischer braucht water), "placement.size" = Grundfläche {w,h} in Feldern (1-4, Standard 1×1; Lager/Zivilbauten gern 2×1 oder 2×2). Setze IMMER ein glaubwürdiges placement passend zur Funktion des Gebäudes.
   GRAFIK ("meta.art"): Die Engine zeichnet Gebäude prozedural. Wähle mit "meta.art.shape" die passende Silhouette — erlaubt: house, farm, woodcutter, sawmill, gatherer, mine, quarry, smelter (Schmelze/Ofen, glüht), workshop, fishery, harbor (Steg/Kai), market, temple (Kuppel), tower, warehouse, fountain (Brunnen/Becken mit Fontäne). Wähle die Silhouette, die zur FUNKTION passt — ein Brunnen ist "fountain", kein "temple". (Ohne shape wird der Typ automatisch aus Funktion/Name erraten.) Für neue Zeitalter/Materialien kannst du das Aussehen anpassen: "meta.art.accent" = Signaturfarbe (Hex, z.B. "#c94f2a"), "meta.art.wall"/"meta.art.roof" = Wand-/Dachfarbe (Hex) für epochentypische Baustoffe.
   MILITÄR ("meta.military"): Das Spiel hat ein Kriegssystem (Soldaten, Raubzüge, Verteidigung). Du darfst epochentypische WEHRANLAGEN einführen (category "civic", z.B. Palisade → Steinmauer → Bastion): "meta.military.defense" = Verteidigungswert (10–15 × Epochen-Order, workers 0, shape "tower"). Selten einsetzen (höchstens 1 je Pack, nur wenn die Epoche noch keine hat).
-- "epochs": Array mit maximal EINER neuen Epoche: { id, order, name:{de,en}, description:{de}, advance (oder null wenn vorerst final), modifiers, tier, needs }. Bei einer neuen Epoche sind PFLICHT:
+${!allowEpochs ? `- (Neue EPOCHEN sind in diesem Pack NICHT vorgesehen — die Siedlung hat die letzte Epoche noch nicht erreicht. Lasse "epochs" und "epochAdvance" weg und konzentriere dich auf Gebäude, Ressourcen und Ereignisse.)
+` : `- "epochs": Array mit maximal EINER neuen Epoche: { id, order (MUSS exakt ${nextOrder} sein), name:{de,en}, description:{de}, advance (oder null wenn vorerst final), modifiers, tier, needs }. Bei einer neuen Epoche sind PFLICHT:
     • "modifiers": { "productionMultiplier": (steigt je Epoche, z.B. +0.2 gegenüber der Vorepoche), "populationGrowth": (klein, z.B. 0.012–0.02) }
     • "tier": { "name": {de,en} } = wie die Bevölkerung dieser Stufe heißt (Steinzeit "Jäger & Sammler" → "Siedler" → "Bürger" → …).
-    • "needs": { ressourceId: mengeProKopfProTick } = 1–3 Güter, welche die Bevölkerung dieser Ära zum Zufriedensein verlangt. KRITISCH: Der Wert skaliert PRO KOPF, die Produktion aber pro Gebäude — rechne die GESAMTE Vorkette in Arbeitern je Einheit/Tick durch (Gebäude-workers/outputRate + Vorprodukte)! Ein Gut mit tiefer Kette (z.B. Stahlwaren: Erz→Barren→Stahl→Ware ≈ 100 Arbeiter je Einheit/Tick) verträgt höchstens 0.001–0.002 pro Kopf; nur flache Ketten (1 Gebäude) vertragen 0.005–0.01. Faustregel: needWert × KettenArbeiterkosten ≤ 0.15 (max. 15 % der Bevölkerung arbeiten für EIN Bedürfnis). Zu hohe Werte werden automatisch gekappt. Führe für JEDES need-Gut auch einen Produzenten ein (in diesem Pack neu oder bereits existierend), sonst stagniert die Ära.
+    • "needs": { ressourceId: mengeProKopfProTick } = 1–3 Güter, welche die Bevölkerung dieser Ära zum Zufriedensein verlangt. KRITISCH: Der Wert skaliert PRO KOPF, die Produktion aber pro Gebäude — rechne die GESAMTE Vorkette in Arbeitern je Einheit/Tick durch (Gebäude-workers/outputRate + Vorprodukte)! Ein Gut mit tiefer Kette (z.B. Stahlwaren: Erz→Barren→Stahl→Ware ≈ 100 Arbeiter je Einheit/Tick) verträgt höchstens 0.001–0.002 pro Kopf; nur flache Ketten (1 Gebäude) vertragen 0.005–0.01. Faustregel: needWert × KettenArbeiterkosten ≤ 0.15 (max. 15 % der Bevölkerung arbeiten für EIN Bedürfnis). Zu hohe Werte werden automatisch gekappt. Führe für JEDES need-Gut auch einen Produzenten ein (in diesem Pack neu oder bereits existierend), sonst stagniert die Ära.`}
 - "events": Array neuer Tages-Ereignisse (0-2 pro Pack): { id, name:{de,en}, description:{de}, icon (1 Emoji), epoch (ab welcher Epoche es auftreten kann), durationTicks (720=1h bis 17280=1Tag), modifiers:{ production:{ressourceId oder "*": faktor 0.8-1.2}, grant:{ressourceId: menge} } }. Ereignisse sind TEMPORÄR und harmlos — kleine Stimmungs-Momente („Sturm: Holz ×0.85 für 2h", „Erntefest: Nahrung ×1.15 + 60 Nahrung geschenkt"). Erfinde thematisch zur Epoche passende Ereignisse (Seuche/Komet/Messe/Streik/Sonnenwende …).
-- "epochAdvance": { "<epochen-id>": {resources:{},buildings:{},population} } — Aufstiegsbedingung für eine existierende Epoche, die noch keine hat. PFLICHT, wenn du eine neue Epoche anlegst.
+${allowEpochs ? `- "epochAdvance": { "<epochen-id>": {resources:{},buildings:{},population} } — Aufstiegsbedingung für eine existierende Epoche, die noch keine hat. PFLICHT, wenn du eine neue Epoche anlegst.` : ''}
 
 HARTE REGELN:
 1. IDs: englisch, lowercase snake_case (z.B. "copper_mine"). Niemals existierende IDs wiederverwenden.
@@ -184,7 +225,7 @@ HARTE REGELN:
 5. Neue Gebäude dürfen maximal ${Math.round((balance.maxIncreaseOverBest ?? 0.25) * 100)}% besser sein als das beste existierende Gebäude ihrer Epoche.
 6. Baukosten müssen sich frühestens nach ${balance.minAmortizationTicks} Ticks amortisieren (cost-Wert ≥ ${balance.minAmortizationTicks} × Netto-Wert/Tick).
 7. Maximal ${balance.maxNewResourcesPerPack ?? 3} Ressourcen, ${balance.maxNewBuildingsPerPack ?? 4} Gebäude, ${balance.maxNewEpochsPerPack ?? 1} Epoche pro Pack.
-8. Eine neue Epoche braucht order = höchste existierende order + 1, einen "epochAdvance"-Eintrag für die bisherige letzte Epoche UND zwingend modifiers, tier und needs (mit passenden Produzenten für die need-Güter).
+8. ${allowEpochs ? `Eine neue Epoche braucht order genau ${nextOrder}, einen "epochAdvance"-Eintrag für die bisherige letzte Epoche UND zwingend modifiers, tier und needs (mit passenden Produzenten für die need-Güter).` : `Lege KEINE neue Epoche an — "epochs"/"epochAdvance" gehören nicht in dieses Pack.`}
 9. Baue sinnvolle Produktionsketten: neue Ressourcen brauchen Produzenten, verarbeitende Gebäude brauchen existierende Inputs. SELBST-CHECK vor der Ausgabe: Gehe jeden "inputs"-Eintrag JEDES neuen Gebäudes sowie jedes "needs"-Gut durch — für JEDE dieser Ressourcen MUSS es einen Produzenten geben (ein Gebäude mit dieser Ressource in "outputs"), entweder bereits im Spielstand oder als NEUES Gebäude in DIESEM Pack. Verbrauchst du z.B. "wool", dann liefere im selben Pack auch das Gebäude, das "wool" produziert (z.B. eine Schäferei). Gibt es keinen Produzenten, lasse das Gebäude/need WEG. Unerreichbare Inputs führen zur Ablehnung.
 10. Beachte die "recentRejections" im Spielstand: wiederhole abgelehnte Fehler nicht.
 11. VIELFALT & TERRAIN: Nutze das Terrain thematisch — Fischer/Häfen an "water" (placement.adjacent {water}), Minen/Steinbrüche an "rock", Förster/Jäger an "forest", Farmen/Gärten auf "grass". Variiere die Gebäude-Typen (unterschiedliche meta.art.shape statt immer "workshop").
@@ -461,8 +502,8 @@ export async function chatCompletionStream(llm, messages, onToken, opts = {}) {
   return full.trim();
 }
 
-async function completeWithFormats(llm, messages) {
-  const schema = llmPackSchema();
+async function completeWithFormats(llm, messages, schemaOpts) {
+  const schema = llmPackSchema(schemaOpts);
   const formats = [
     { name: 'json_schema', rf: { type: 'json_schema', json_schema: { name: 'content_pack', schema } } },
     { name: 'json_object+schema', rf: { type: 'json_object', schema } },
@@ -495,7 +536,12 @@ async function completeWithFormats(llm, messages) {
  * @returns {{pack: object, raw: string, formatUsed: string}}
  */
 export async function generatePack(exportData, llm, balance) {
-  return completeWithFormats(llm, buildMessages(exportData, balance));
+  return completeWithFormats(llm, buildMessages(exportData, balance), schemaOptsFor(exportData));
+}
+
+/** Schema-Zuschnitt für den aktuellen Spielstand (Epochen-Gate + erzwungene order). */
+function schemaOptsFor(exportData) {
+  return { allowEpochs: epochsWelcome(exportData), nextOrder: nextEpochOrder(exportData) };
 }
 
 /**
@@ -516,5 +562,5 @@ ${reasons.map((r) => `- ${r}`).join('\n')}
 Korrigiere GENAU diese Punkte (verbotene/duplizierte IDs entfernen oder umbenennen, fehlende Produzenten im selben Pack ergänzen oder das betroffene Item weglassen, Zahlen in die erlaubten Grenzen bringen). Ändere sonst NICHTS. Antworte erneut NUR mit dem vollständigen, korrigierten JSON-Objekt.`,
     },
   ];
-  return completeWithFormats(llm, messages);
+  return completeWithFormats(llm, messages, schemaOptsFor(exportData));
 }

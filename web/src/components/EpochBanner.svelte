@@ -89,6 +89,8 @@
     <span class="text-xs {satClass}" title="Zufriedenheit der Bevölkerung">😊 {Math.round(sat * 100)}%</span>
     {#if state.popTrend === 'shrinking'}
       <span class="text-xs text-red-100 bg-red-800/80 border border-red-600 rounded px-2 py-0.5 font-medium" title={state.popReason}>📉 schrumpft</span>
+    {:else if state.popTrend === 'capped'}
+      <span class="text-xs text-amber-100 bg-amber-900/70 border border-amber-700 rounded px-2 py-0.5 font-medium" title={state.popReason}>🏠 Wohnraum voll</span>
     {/if}
     {#if state.epoch.ready}
       <span class="text-xs text-amber-100 bg-amber-700/80 border border-amber-500 rounded px-2 py-0.5 font-medium animate-pulse" title="Alle Aufstiegsbedingungen erfüllt — Details unten">⬆ Aufstieg bereit</span>
@@ -261,6 +263,12 @@
             <br>→ Baue/verstärke die Produktionskette für {n.name || n.id} und weise Arbeiter zu.
           </div>
         {/each}
+      </div>
+    {:else if state.popTrend === 'capped'}
+      <!-- Wohnraum-Deckel: alles gesund, aber das Wachstum steht still -->
+      <div class="mt-2 pt-2 border-t border-amber-900/60 text-xs text-amber-200">
+        <div>🏠 <b>Wohnraum voll:</b> {Math.floor(state.population)} von {state.housing} Plätzen belegt.</div>
+        <div class="mt-1 text-amber-300/90">→ Baue Wohngebäude, sonst wächst die Siedlung nicht weiter — Nahrung und Bedürfnisse sind gedeckt.</div>
       </div>
     {/if}
   {/if}

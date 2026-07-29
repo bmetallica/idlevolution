@@ -76,14 +76,22 @@ services:
       # Cron-Zeitplan für die nächtliche Content-Generierung
       AI_CRON: ${AI_CRON:-0 3 * * *}
       AI_RUN_ON_START: ${AI_RUN_ON_START:-false}
+      # Wiederholversuche, falls der LLM-Server um 03:00 gerade nicht kann
+      AI_RETRIES: ${AI_RETRIES:-3}
+      AI_RETRY_DELAY_MINUTES: ${AI_RETRY_DELAY_MINUTES:-20}
+      # Aufbewahrung von data/exports und data/rejected (Tage, 0 = nie löschen)
+      AI_ARCHIVE_KEEP_DAYS: ${AI_ARCHIVE_KEEP_DAYS:-30}
     volumes:
       - ./data:/data
-    # C4: Watchdog — der Scheduler schreibt alle 60 s einen Heartbeat nach /data.
-    # Bleibt die Datei > 3 min alt, gilt der Worker als tot (restart: unless-stopped
-    # startet ihn dann zwar nicht automatisch neu, aber `docker compose ps` und
-    # Monitoring sehen den Zustand sofort).
+    # C4: Watchdog — zwei Bedingungen, denn ein lebendiger Prozess ist noch kein
+    # gesunder Lauf: In den fünf Ausfallnächten ab dem 24.07. schrieb der
+    # Scheduler brav weiter seinen Heartbeat, während die Generierung jede Nacht
+    # scheiterte — der Container galt durchgehend als "healthy".
+    #  1. Heartbeat < 3 min alt  → der Prozess lebt
+    #  2. ai-worker.lastcontent < 48 h alt → es kommt auch tatsächlich Inhalt an
+    #     (Kulanz für den ersten Start: fehlt die Datei, zählt nur Bedingung 1)
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"const s=require('fs').statSync('/data/ai-worker.heartbeat'); if (Date.now()-s.mtimeMs>180000) process.exit(1)\""]
+      test: ["CMD-SHELL", "node -e \"const fs=require('fs');const s=fs.statSync('/data/ai-worker.heartbeat');if(Date.now()-s.mtimeMs>180000)process.exit(1);try{const c=fs.statSync('/data/ai-worker.lastcontent');if(Date.now()-c.mtimeMs>172800000)process.exit(1)}catch{}\""]
       interval: 60s
       timeout: 5s
       retries: 3

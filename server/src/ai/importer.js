@@ -7,6 +7,8 @@ import { validateStructure, validateReferences } from '../content/validator.js';
 import { balancePack } from '../content/balancer.js';
 import { chainWorkerCost, maxAffordableNeed } from '../content/needs.js';
 import { mergePack, cloneRegistry, epochsInOrder } from '../content/loader.js';
+import { isKnownShape } from '../content/shapes.js';
+import { findDuplicateBuildings } from './similarity.js';
 import { runTicks } from '../engine/tick.js';
 import { logEvent } from '../engine/state.js';
 
@@ -58,7 +60,13 @@ function inferPlacementAndArt(b) {
   p.size = { w: clamp(Math.round(p.size.w) || 1, 1, 4), h: clamp(Math.round(p.size.h) || 1, 1, 4) };
 
   b.placement = p;
-  b.meta = { ...(b.meta || {}), art: { shape: b.category, ...(b.meta?.art || {}) } };
+  // shape NUR übernehmen, wenn es eine echte Silhouette ist. Vorher wurde
+  // ersatzweise b.category eingesetzt ("production", "civic") — das ist keine
+  // Silhouette, und der Client musste sie hinterher wieder wegraten. Ohne shape
+  // greift classifyByFunction(), das aus Name/Produktion deutlich besser rät.
+  const art = { ...(b.meta?.art || {}) };
+  if (!isKnownShape(art.shape)) delete art.shape;
+  b.meta = { ...(b.meta || {}), art };
   return b;
 }
 
@@ -145,9 +153,45 @@ function dropCollisions(pack, registry) {
   }
 }
 
+// Häufigster struktureller Ablehnungsgrund der Lauf-Historie (10×):
+// `description: "Text"` statt `{de: "Text"}`. Solange die json_schema-Stufe der
+// Format-Kaskade greift, passiert das nicht — fällt sie auf 'none' zurück,
+// kostete ein sonst gutes Pack komplett. Eine Coercion ersetzt die Fehlerklasse.
+const I18N_FIELDS = ['name', 'description', 'title'];
+
+function coerceI18n(item) {
+  if (!item || typeof item !== 'object') return item;
+  for (const f of I18N_FIELDS) {
+    const v = item[f];
+    if (typeof v === 'string') {
+      const de = v.trim();
+      if (de) item[f] = { de };
+      else delete item[f];
+    } else if (v && typeof v === 'object') {
+      // Sprachwerte müssen Strings sein; verschachtelte Objekte sind unbrauchbar
+      for (const lang of Object.keys(v)) {
+        if (typeof v[lang] !== 'string') delete v[lang];
+      }
+      if (!v.de) {
+        // Ohne 'de' aber mit anderer Sprache: die erste als Deutsch übernehmen,
+        // statt das Item wegen fehlendem Pflichtfeld zu verlieren.
+        const first = Object.values(v).find((x) => typeof x === 'string' && x.trim());
+        if (first) v.de = first;
+        else delete item[f];
+      }
+    }
+  }
+  return item;
+}
+
 function normalizePack(raw) {
   const pack = structuredClone(raw || {});
   pack.schemaVersion = 1;
+  for (const key of ['resources', 'buildings', 'epochs', 'events']) {
+    if (Array.isArray(pack[key])) pack[key] = pack[key].map(coerceI18n);
+  }
+  // Epochen tragen den Stufennamen verschachtelt
+  if (Array.isArray(pack.epochs)) for (const e of pack.epochs) if (e?.tier) coerceI18n(e.tier);
   if (Array.isArray(pack.buildings)) pack.buildings = pack.buildings.map(inferPlacementAndArt);
   if (Array.isArray(pack.epochs)) pack.epochs = pack.epochs.map(inferEpochDefaults);
   pack.pack = {
@@ -359,6 +403,34 @@ export async function importPack(rawPack, run, ctx) {
   const soft = softLockCheck(balanced, ctx);
   if (!soft.ok) return reject([...allRejected, ...soft.errors.map((e) => ({ type: 'reachability', reason: e }))]);
 
+  // Inhaltliche Dubletten aussortieren (updates.md 2.3). Bewusst WEICH: nur die
+  // betroffenen Gebäude fallen weg, das Pack bleibt. Die Begründung landet in der
+  // Lauf-Historie und damit über recentRejections im nächsten Prompt.
+  if (ctx.config.aiDuplicateThreshold > 0 && balanced.buildings?.length) {
+    try {
+      const dups = await findDuplicateBuildings(
+        balanced.buildings,
+        [...ctx.registryHolder.registry.buildings.values()],
+        { baseUrl: ctx.config.llm.baseUrl, embedModel: ctx.config.llm.embedModel },
+        ctx.config.aiDuplicateThreshold
+      );
+      for (const d of dups) {
+        allRejected.push({
+          type: 'duplicate',
+          reason: `Gebäude '${d.id}' wiederholt inhaltlich '${d.similarTo}' (gleiche Funktion, Ähnlichkeit ${d.score}) — erfinde etwas anderes`,
+        });
+      }
+      if (dups.length) {
+        const drop = new Set(dups.map((d) => d.id));
+        balanced.buildings = balanced.buildings.filter((b) => !drop.has(b.id));
+        if (!balanced.buildings.length) delete balanced.buildings;
+      }
+    } catch {
+      // Embedding-Server nicht erreichbar → Prüfung entfällt. Eine Zusatzprüfung
+      // darf die Nacht nie kosten.
+    }
+  }
+
   const sandbox = sandboxCheck(balanced, ctx);
   if (!sandbox.ok) return reject([...allRejected, ...sandbox.errors.map((e) => ({ type: 'sandbox', reason: e }))]);
 
@@ -392,3 +464,7 @@ export async function importPack(rawPack, run, ctx) {
 
   return { status, packId: balanced.pack.id, file, accepted, rejected: allRejected, notes, chronicle: balanced.chronicle || null };
 }
+
+// für Tests
+export const _coerceI18n = coerceI18n;
+export const _normalizePack = normalizePack;

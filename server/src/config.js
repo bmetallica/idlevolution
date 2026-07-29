@@ -32,10 +32,28 @@ export const config = {
     // (n_ctx − Prompt) gedeckelt.
     maxTokens: num(process.env.LLM_MAX_TOKENS, 12288),
     temperature: num(process.env.LLM_TEMPERATURE, 0.7),
+    // Ein Content-Pack ist überwiegend Zahlen unter harten Regeln — dort ist
+    // hohe Temperatur nur Risiko (Ausreißer, die der Balancer wieder kappt).
+    // Die erzählerische Chronik entsteht im selben Aufruf, deshalb nicht zu tief.
+    temperatureNightly: num(process.env.LLM_TEMPERATURE_NIGHTLY, 0.45),
     // Reasoning ("<think>") kostet bei den lokalen Modellen das gesamte
     // Ausgabebudget, bevor JSON kommt. Standard: aus. LLM_THINKING=true reaktiviert es.
     thinking: process.env.LLM_THINKING === 'true',
+    // Einbettungs-Modell für die Dubletten-Prüfung (läuft permanent mit)
+    embedModel: process.env.LLM_MODEL_EMBED || 'nomic-embed-text',
   },
+
+  // Schwelle der inhaltlichen Dubletten-Sperre (0 = aus). An 66 echten Gebäuden
+  // kalibriert: funktionsgleiche, legitim verschiedene Paare bleiben unter 0.76,
+  // echte Dubletten liegen bei 0.89 — siehe ai/similarity.js.
+  aiDuplicateThreshold: num(process.env.AI_DUPLICATE_THRESHOLD, 0.8),
+
+  // Nächtlicher Lauf: Wiederholversuche, falls der LLM-Server um 03:00 gerade
+  // offline ist oder ein anderes Modell lädt. Ohne sie ist die Nacht verloren.
+  aiRetries: num(process.env.AI_RETRIES, 3),
+  aiRetryDelayMinutes: num(process.env.AI_RETRY_DELAY_MINUTES, 20),
+  // Aufbewahrung von data/exports und data/rejected (Tage; 0 = nie löschen).
+  aiArchiveKeepDays: num(process.env.AI_ARCHIVE_KEEP_DAYS, 30),
 
   // Token-Budget des nächtlichen Exports. Der Spielstand wächst unbegrenzt —
   // ohne Deckel frisst der Prompt irgendwann das ganze Kontextfenster.

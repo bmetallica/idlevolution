@@ -18,7 +18,7 @@ import { logEvent } from '../engine/state.js';
 import { savePlayer, newPlayerOnIsland, saveWorld } from '../engine/players.js';
 import { planTurn } from '../ai/strategist.js';
 import { autoAssignWorkers } from '../ai/executor.js';
-import { validateQuests, fallbackQuests, claimQuest, questProgress } from '../engine/quests.js';
+import { validateQuests, fallbackQuests, topUpQuests, claimQuest, questProgress } from '../engine/quests.js';
 import { generateQuestIdeas } from '../ai/questgen.js';
 import { createShipment, findHarbor } from '../engine/ships.js';
 import { declareWar, cancelDeclaration, resolveWars, aiConsiderWar, armyOf, defenseOf, logWar } from '../engine/war.js';
@@ -94,6 +94,13 @@ export default async function gameRoutes(fastify) {
     }
     else if (drainingNeeds.length) { popReason = `Warnung — Vorrat schrumpft: ${drainingNeeds.map((n) => n.name).join(', ')} (bald Unzufriedenheit)`; if (state.population + 1e-6 < housingCap) popTrend = 'growing'; }
     else if (state.population + 1e-6 < housingCap) { popTrend = 'growing'; popReason = null; }
+    // Wohnraum-Deckel: Nahrung reicht, alle Bedürfnisse gedeckt, trotzdem
+    // wächst nichts mehr. Ohne Hinweis wirkt das wie eine Sackgasse — bisher
+    // erfuhr man den Grund nur, wenn man den Berater gezielt danach fragte.
+    else if (housingCap > 0 && state.population + 1e-6 >= housingCap) {
+      popTrend = 'capped';
+      popReason = 'Wohnraum voll — für weiteres Wachstum fehlen Wohngebäude';
+    }
 
     return {
       tick: state.tick,
@@ -140,6 +147,7 @@ export default async function gameRoutes(fastify) {
         })() : null,
       },
       satisfaction: state.satisfaction ?? 1,
+      housing: housingCap,
       popTrend,
       popReason,
       // D1: aktives Tages-Ereignis (Toast + Badge im Client)
@@ -595,6 +603,10 @@ export default async function gameRoutes(fastify) {
     let items = validateQuests(ideas, registry, ctx.state, ctx.game);
     const source = items.length >= 2 ? 'llm' : 'fallback';
     if (items.length < 2) items = fallbackQuests(registry, ctx.state, ctx.game);
+    // Auf die volle Anzahl auffüllen — sonst fehlt dem Spieler dauerhaft ein
+    // Ziel, sobald ein LLM-Vorschlag mechanisch unerreichbar ist (z.B. jedes
+    // Bevölkerungs-Ziel bei vollem Wohnraum).
+    items = topUpQuests(items, registry, ctx.state, ctx.game);
     ctx.state.quests = { generatedAt: new Date().toISOString(), items };
     await savePlayer(ctx.pool, ctx.state);
     logEvent(ctx.pool, 'quests_generated', { count: items.length, source }).catch(() => {});

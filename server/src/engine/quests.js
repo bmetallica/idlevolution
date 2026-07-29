@@ -82,6 +82,26 @@ function defaultTitle(registry, q) {
   return `Lagere ${q.amount}× ${registry.resources.get(q.resourceId)?.name?.de || q.resourceId}`;
 }
 
+/**
+ * Füllt eine Zielliste mechanisch auf MAX_QUESTS auf.
+ * Ohne das blieb der Spieler regelmäßig bei 2 statt 3 Zielen: Ist der Wohnraum
+ * voll, fällt JEDES 'population'-Ziel des LLM in validateQuests() durch — und
+ * die Route gab sich ab 2 Zielen zufrieden, obwohl fallbackQuests() genau
+ * diesen Fall korrekt behandelt (Wohngebäude statt Bevölkerung).
+ */
+export function topUpQuests(items, registry, state, game) {
+  if (items.length >= MAX_QUESTS) return items.slice(0, MAX_QUESTS);
+  const seen = new Set(items.map((q) => `${q.type}:${q.buildingId || q.resourceId || 'pop'}`));
+  for (const cand of fallbackQuests(registry, state, game)) {
+    if (items.length >= MAX_QUESTS) break;
+    const key = `${cand.type}:${cand.buildingId || cand.resourceId || 'pop'}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({ ...cand, id: `q${items.length + 1}` });
+  }
+  return items;
+}
+
 /** Mechanische Fallback-Ziele, falls das LLM nicht liefert (Nacht gerettet). */
 export function fallbackQuests(registry, state, game) {
   const raw = [];

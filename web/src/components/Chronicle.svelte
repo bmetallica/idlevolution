@@ -15,7 +15,38 @@
     loading = false;
   });
 
-  $: chronicle = packs.filter((p) => p.chronicle?.de).map((p) => ({ id: p.id, date: p.createdAt, text: p.chronicle.de })).reverse();
+  // Die Chronik entsteht aus den Packs — gescheiterte Nächte hinterließen dort
+  // eine unsichtbare Lücke (fünf verlorene Nächte fielen erst beim Log-Lesen auf).
+  // Deshalb werden Fehlschläge als eigener Eintrag eingemischt.
+  $: chronicle = [
+    ...packs.filter((p) => p.chronicle?.de).map((p) => ({ id: p.id, date: p.createdAt, text: p.chronicle.de, failed: false })),
+    ...runs
+      .filter((r) => r.status === 'error')
+      .map((r) => ({
+        id: `run-${r.id}`,
+        date: r.started_at,
+        text: 'Die Baumeister ruhten in dieser Nacht — es entstanden keine neuen Pläne.',
+        failed: true,
+        error: r.error,
+      })),
+  ].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Archiv: nach Monaten gruppiert, damit die Geschichte der Insel auch nach
+  // Monaten noch durchblätterbar bleibt statt zu einer endlosen Liste zu werden.
+  $: chronicleMonths = (() => {
+    const out = [];
+    for (const e of chronicle) {
+      const d = new Date(e.date);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      let g = out[out.length - 1];
+      if (!g || g.key !== key) {
+        g = { key, label: d.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' }), entries: [] };
+        out.push(g);
+      }
+      g.entries.push(e);
+    }
+    return out;
+  })();
   $: aiPacks = packs.filter((p) => p.source === 'ai').slice().reverse();
 
   // C4: Nightly-Telemetrie — Akzeptanz-Quote, letzter Lauf, Clamp-Notizen.
@@ -25,7 +56,27 @@
     const ageH = (Date.now() - new Date(runs[0].started_at).getTime()) / 3600000;
     const ok = runs.filter((r) => r.status === 'accepted' || r.status === 'partial').length;
     const clamps = runs.flatMap((r) => r.accepted?.notes || []).slice(0, 3);
-    return { ageH: Math.round(ageH * 10) / 10, ok, total: runs.length, stale: ageH > 26, clamps };
+    // Ein lebendiger Prozess ist noch kein gesunder Lauf: Der Watchdog war in
+    // allen fünf Ausfallnächten "healthy". Deshalb zusätzlich das ERGEBNIS
+    // bewerten — wann kam zuletzt tatsächlich Inhalt an?
+    const lastOk = runs.find((r) => r.status === 'accepted' || r.status === 'partial');
+    const okAgeH = lastOk ? (Date.now() - new Date(lastOk.started_at).getTime()) / 3600000 : Infinity;
+    // Häufigster Ablehnungsgrund — zeigt, woran die KI systematisch scheitert
+    const counts = {};
+    for (const r of runs) for (const rej of r.rejected || []) {
+      const key = String(rej.reason || rej.type || rej).replace(/'[^']*'/g, "'…'").replace(/\d+/g, 'N');
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    const topReason = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || null;
+    return {
+      ageH: Math.round(ageH * 10) / 10,
+      ok, total: runs.length,
+      stale: ageH > 26,
+      okAgeH: Math.round(okAgeH),
+      starving: okAgeH > 48, // seit über 2 Tagen kein Inhalt — unabhängig vom Prozess
+      clamps,
+      topReason,
+    };
   })();
 
   const fmt = (d) => { try { return new Date(d).toLocaleString('de-DE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
@@ -60,12 +111,27 @@
       {#if chronicle.length === 0}
         <p class="text-xs text-stone-600 italic">Noch keine Einträge. Jede Nacht analysiert die KI die Siedlung, erweitert das Spiel und schreibt hier ihren Bericht.</p>
       {:else}
-        <div class="space-y-3">
-          {#each chronicle as e (e.id)}
-            <div class="border-l-2 border-amber-900 pl-3">
-              <div class="text-[10px] text-stone-600 font-mono">{fmtDay(e.date)}</div>
-              <p class="text-xs text-stone-300 leading-relaxed">{e.text}</p>
-            </div>
+        <div class="text-[10px] text-stone-600 mb-2">
+          {chronicle.length} Einträge über {chronicleMonths.length} Monat{chronicleMonths.length === 1 ? '' : 'e'}
+        </div>
+        <div class="space-y-4">
+          {#each chronicleMonths as m (m.key)}
+            <section>
+              <h3 class="sticky top-0 z-10 -mx-3 px-3 py-1 bg-stone-900/95 backdrop-blur text-[10px] uppercase tracking-widest text-amber-300/70 border-b border-stone-800">
+                {m.label} <span class="text-stone-600 normal-case tracking-normal">· {m.entries.length}</span>
+              </h3>
+              <div class="space-y-3 mt-2">
+                {#each m.entries as e (e.id)}
+                  <div class="border-l-2 {e.failed ? 'border-stone-700' : 'border-amber-900'} pl-3">
+                    <div class="text-[10px] text-stone-600 font-mono">{fmtDay(e.date)}</div>
+                    <p class="text-xs {e.failed ? 'text-stone-500 italic' : 'text-stone-300'} leading-relaxed">{e.text}</p>
+                    {#if e.failed && e.error}
+                      <div class="text-[10px] text-red-400/70 mt-0.5 font-mono">⚠ {e.error}</div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </section>
           {/each}
         </div>
       {/if}
@@ -77,15 +143,25 @@
         <p class="text-xs text-stone-600 italic">Noch keine KI-Läufe protokolliert.</p>
       {:else}
         {#if telemetry}
-          <div class="mb-2 rounded border {telemetry.stale ? 'border-red-800 bg-red-950/30' : 'border-stone-800 bg-stone-950/60'} px-2 py-1.5 text-[11px]">
+          <div class="mb-2 rounded border {telemetry.stale || telemetry.starving ? 'border-red-800 bg-red-950/30' : 'border-stone-800 bg-stone-950/60'} px-2 py-1.5 text-[11px]">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="{telemetry.stale ? 'text-red-300' : 'text-stone-300'}">
                 {telemetry.stale ? '🔴' : '🟢'} letzter Lauf vor <b>{telemetry.ageH} h</b>
               </span>
               <span class="text-stone-400">· Quote: <b class="{telemetry.ok / telemetry.total >= 0.7 ? 'text-emerald-300' : 'text-amber-300'}">{Math.round((telemetry.ok / telemetry.total) * 100)} %</b> akzeptiert ({telemetry.ok}/{telemetry.total})</span>
             </div>
+            {#if telemetry.starving}
+              <div class="text-red-300 mt-0.5">
+                ⚠ seit <b>{telemetry.okAgeH} h</b> kein Inhalt angekommen — die Läufe starten, liefern aber nichts.
+              </div>
+            {/if}
             {#if telemetry.stale}
               <div class="text-red-300/90 mt-0.5">ai-worker prüfen: <code>docker compose ps ai-worker</code></div>
+            {/if}
+            {#if telemetry.topReason}
+              <div class="text-stone-500 mt-0.5" title="Woran die KI am häufigsten scheitert">
+                ✖ häufigster Ablehnungsgrund ({telemetry.topReason[1]}×): {telemetry.topReason[0]}
+              </div>
             {/if}
             {#if telemetry.clamps.length}
               <div class="text-stone-500 mt-0.5" title="Werte, die der Balancer zuletzt gekappt hat">✂ {telemetry.clamps[0]}</div>

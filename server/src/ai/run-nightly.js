@@ -4,7 +4,9 @@
 
 import { config } from '../config.js';
 import { generatePack, repairPack } from './generator.js';
-import { readFile } from 'node:fs/promises';
+import { pruneArchives } from './retention.js';
+import { generateEvents } from './eventgen.js';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const headers = {
@@ -46,8 +48,13 @@ export async function runNightly(log = console) {
     await readFile(path.join(config.dataDir, 'balance.config.json'), 'utf8')
   ).balance;
 
-  // D4: Modell-Routing — die Nacht-Generierung darf das große Qualitäts-Modell nutzen
-  const nightlyLlm = { ...config.llm, model: config.llm.modelNightly || config.llm.model };
+  // D4: Modell-Routing — die Nacht-Generierung darf das große Qualitäts-Modell nutzen.
+  // Temperatur bewusst niedriger als im Chat: Zahlen unter harten Regeln.
+  const nightlyLlm = {
+    ...config.llm,
+    model: config.llm.modelNightly || config.llm.model,
+    temperature: config.llm.temperatureNightly ?? config.llm.temperature,
+  };
 
   // Die Content-Generierung ist nur EIN Teil der Nacht. Schlug sie fehl, brach
   // bisher der gesamte Lauf ab — KI-Planung, Tagesziele, Kriegs-Auflösung und
@@ -62,6 +69,20 @@ export async function runNightly(log = console) {
     log.error?.(`[nightly] LLM-Generierung fehlgeschlagen: ${err.message}`);
     await api('POST', '/api/ai/runs', { status: 'error', export: exportData, error: err.message }).catch(() => {});
     result = { status: 'error', error: err.message };
+  }
+
+  // Ereignisse in eigenem Mini-Aufruf nachreichen (updates.md 3.2): im großen
+  // Pack standen sie am Ende und fielen faktisch immer weg.
+  if (generated && !generated.pack.events?.length) {
+    try {
+      const events = await generateEvents(exportData, nightlyLlm);
+      if (events.length) {
+        generated.pack.events = events;
+        log.info?.(`[nightly] ${events.length} Ereignis(se) ergänzt`);
+      }
+    } catch (err) {
+      log.warn?.(`[nightly] Ereignis-Generierung übersprungen: ${err.message}`);
+    }
   }
 
   if (generated) {
@@ -129,9 +150,28 @@ export async function runNightly(log = console) {
     log.info?.(`[nightly] Online-Sync übersprungen: ${err.message}`);
   }
 
+  // Archive beschneiden (data/exports, data/rejected) — wachsen sonst unbegrenzt
+  try {
+    await pruneArchives(config.dataDir, config.aiArchiveKeepDays, log);
+  } catch (err) {
+    log.warn?.(`[nightly] Archiv-Aufräumen übersprungen: ${err.message}`);
+  }
+
+  // C4+: Ergebnis-Marke für den Watchdog. Der Heartbeat beweist nur, dass der
+  // Prozess lebt — genau das war in allen fünf Ausfallnächten der Fall. Diese
+  // Datei wird nur bei tatsächlich angekommenem Inhalt aktualisiert.
+  if (generated && result.status !== 'rejected') {
+    await writeFile(
+      path.join(config.dataDir, 'ai-worker.lastcontent'),
+      JSON.stringify({ at: new Date().toISOString(), status: result.status, packId: result.packId })
+    ).catch(() => {});
+  }
+
   if (!generated) {
-    // Alle übrigen Nacht-Aufgaben sind gelaufen; jetzt darf der Fehler nach oben,
-    // damit der Scheduler ihn sichtbar protokolliert.
+    // Der Fehlschlag steht bereits als 'error'-Lauf in ai_runs (oben) — der
+    // Client macht daraus einen sichtbaren Chronik-Eintrag. Alle übrigen
+    // Nacht-Aufgaben sind gelaufen; jetzt darf der Fehler nach oben, damit der
+    // Scheduler ihn protokolliert.
     throw new Error(`Content-Generierung fehlgeschlagen: ${result.error}`);
   }
   if (result.status === 'rejected') {

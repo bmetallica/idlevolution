@@ -177,6 +177,8 @@ async function buildExportAt(ctx, detailWindow) {
       Object.values(state.buildings).reduce((s, b) => s + (b.workers ?? 0), 0),
     resources,
     buildings,
+    // Nur IDs — der Ereignis-Generator braucht sie als Sperrliste (billig)
+    events: [...(registry.events?.values?.() || [])].map((e) => ({ id: e.id })),
     // Sagt dem Modell ausdrücklich, dass ältere Einträge nur verkürzt vorliegen —
     // sonst hält es fehlende Felder für „gibt es nicht" und baut Dubletten.
     detailHinweis:
