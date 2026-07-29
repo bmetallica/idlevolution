@@ -279,7 +279,10 @@ Alles über `.env` (siehe `.env.example`):
 | `PERSIST_EVERY_TICKS` | Speicherintervall |
 | `OFFLINE_CAP_HOURS` | Maximal nachgeholte Offline-Progression |
 | `LLM_BASE_URL` / `LLM_MODEL` | OpenAI-kompatibler LLM-Endpunkt + Modell |
-| `LLM_CTX` / `LLM_MAX_TOKENS` / `LLM_TEMPERATURE` | LLM-Parameter |
+| `LLM_CTX` / `LLM_MAX_TOKENS` / `LLM_TEMPERATURE` | LLM-Parameter. `LLM_CTX` ist nur ein Fallback — das echte Kontextfenster wird beim Server erfragt |
+| `LLM_MODEL_NIGHTLY` / `LLM_MODEL_CHAT` | Modell-Routing je Rolle (Content-Generierung vs. Berater/Strategist/Quests) |
+| `LLM_THINKING` | Reasoning (`<think>`) zulassen. Standard `false` — sonst verbraucht das Modell das Ausgabebudget, bevor JSON kommt |
+| `AI_EXPORT_TOKEN_BUDGET` | Obergrenze des Spielstand-Exports im Nacht-Prompt (Tokens, Standard 6000) |
 | `AI_CRON` | Zeitplan der nächtlichen Generierung (Cron-Syntax) |
 | `AI_RUN_ON_START` | Sofortlauf beim Start (Debug) |
 | `ONLINE_CLIENT_ID` | GitHub-OAuth-App-Client-ID für den Online-Modus (öffentlich, Standard gesetzt) |

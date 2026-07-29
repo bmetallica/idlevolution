@@ -35,9 +35,11 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:8080}
       LLM_MODEL: ${LLM_MODEL:-gemma4-12b}
       LLM_MODEL_CHAT: ${LLM_MODEL_CHAT:-}
-      LLM_CTX: ${LLM_CTX:-32768}
+      LLM_CTX: ${LLM_CTX:-16384}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-12288}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
+      LLM_THINKING: ${LLM_THINKING:-false}
+      AI_EXPORT_TOKEN_BUDGET: ${AI_EXPORT_TOKEN_BUDGET:-6000}
       # Optionaler Schreibschutz der Spiel-API (x-game-token); leer = aus
       GAME_TOKEN: ${GAME_TOKEN:-}
     volumes:
@@ -66,9 +68,11 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-http://localhost:8080}
       LLM_MODEL: ${LLM_MODEL:-gemma4-12b}
       LLM_MODEL_NIGHTLY: ${LLM_MODEL_NIGHTLY:-}
-      LLM_CTX: ${LLM_CTX:-32768}
+      LLM_CTX: ${LLM_CTX:-16384}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-12288}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
+      LLM_THINKING: ${LLM_THINKING:-false}
+      AI_EXPORT_TOKEN_BUDGET: ${AI_EXPORT_TOKEN_BUDGET:-6000}
       # Cron-Zeitplan für die nächtliche Content-Generierung
       AI_CRON: ${AI_CRON:-0 3 * * *}
       AI_RUN_ON_START: ${AI_RUN_ON_START:-false}

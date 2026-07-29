@@ -256,14 +256,94 @@ export function extractJSON(text) {
   }
 }
 
-export async function chatCompletion(llm, messages, responseFormat) {
+// ── Kontext-Budgetierung ─────────────────────────────────────────────────────
+// Der LLM-Server erzwingt sein eigenes n_ctx. Ein zu großes LLM_CTX führte dazu,
+// dass max_tokens still auf den Rest gekappt wurde und ein Reasoning-Modell
+// mitten im Denken auslief: finish_reason 'length', content leer, Nacht verloren
+// (gemma4-12b liefert real 16384 statt der konfigurierten 32768). Deshalb: echtes
+// n_ctx einmalig beim Server erfragen und das Ausgabebudget daraus ableiten.
+
+const CTX_CACHE = new Map(); // model → n_ctx
+
+/** Bewusst leicht pessimistische Schätzung (dt. Text + JSON ≈ 3,1 Zeichen/Token). */
+export function estimateTokens(text) {
+  return Math.ceil(String(text ?? '').length / 3.1);
+}
+
+/** Prompt-Größe inkl. Rollenmarker des Chat-Templates. */
+export function messagesTokens(messages) {
+  return messages.reduce((s, m) => s + estimateTokens(m.content) + 4, 0);
+}
+
+/**
+ * Ermittelt die tatsächliche Kontextgröße eines Modells: Ein absichtlich
+ * überlanger Prompt wird von llama.cpp VOR der Inferenz abgelehnt und nennt
+ * n_ctx im Fehlertext — exakt und ohne GPU-Kosten. Ergebnis je Modell gecacht;
+ * scheitert die Abfrage, bleibt es beim konfigurierten LLM_CTX.
+ */
+export async function discoverContext(llm) {
+  if (CTX_CACHE.has(llm.model)) return CTX_CACHE.get(llm.model);
+  let ctx = llm.ctx;
+  try {
+    // ~3× das erwartete Fenster, gedeckelt — garantiert den Überlauf, bleibt aber klein genug
+    const words = Math.min(Math.max(llm.ctx * 3, 60000), 200000);
+    const res = await fetch(`${llm.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: llm.model,
+        messages: [{ role: 'user', content: 'Wort '.repeat(words) }],
+        max_tokens: 1,
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+    const data = await res.json().catch(() => ({}));
+    const found = Number(data?.error?.n_ctx);
+    if (Number.isFinite(found) && found > 0) ctx = found;
+  } catch {
+    // Server antwortet nicht wie erwartet → konfigurierter Wert muss reichen
+  }
+  CTX_CACHE.set(llm.model, ctx);
+  return ctx;
+}
+
+export function _resetContextCache() { CTX_CACHE.clear(); } // für Tests
+
+/**
+ * Ein Chat-Completion-Aufruf mit hartem Kontext-Budget.
+ * @param {object} opts
+ * @param {number} [opts.minOutputTokens] Mindest-Ausgabebudget, sonst Fehler statt Fehlschlag-Nacht
+ * @param {boolean} [opts.thinking] Reasoning zulassen (Standard: aus — siehe unten)
+ */
+export async function chatCompletion(llm, messages, responseFormat, opts = {}) {
+  const ctx = await discoverContext(llm);
+  const promptTokens = messagesTokens(messages);
+  const reserve = 256; // Template-Overhead + Sicherheitsmarge
+  const minOutput = opts.minOutputTokens ?? 512;
+  const budget = ctx - promptTokens - reserve;
+  if (budget < minOutput) {
+    throw new Error(
+      `Prompt zu groß für '${llm.model}': ~${promptTokens} von ${ctx} Kontext-Tokens belegt, ` +
+        `nur ${budget} für die Antwort übrig (mindestens ${minOutput} nötig) — ` +
+        `Export kürzen (AI_EXPORT_TOKEN_BUDGET) oder Modell mit größerem Kontext wählen (LLM_MODEL_NIGHTLY)`
+    );
+  }
+  const maxTokens = Math.max(1, Math.min(llm.maxTokens || budget, budget));
+
   const body = {
     model: llm.model,
     messages,
     temperature: llm.temperature,
-    max_tokens: llm.maxTokens,
+    max_tokens: maxTokens,
   };
   if (responseFormat) body.response_format = responseFormat;
+  // Reasoning kostet hier nur Budget: Struktur erzwingt ohnehin die Grammatik,
+  // und ein denkendes Modell verbrauchte regelmäßig das gesamte Fenster, bevor
+  // das erste JSON-Zeichen kam. Abschaltbar über llm.thinking / LLM_THINKING.
+  if (!(opts.thinking ?? llm.thinking)) {
+    body.chat_template_kwargs = { ...(body.chat_template_kwargs || {}), enable_thinking: false };
+  }
+
   const res = await fetch(`${llm.baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -276,11 +356,15 @@ export async function chatCompletion(llm, messages, responseFormat) {
   }
   const data = await res.json();
   const choice = data.choices?.[0];
-  const content = choice?.message?.content;
+  let content = choice?.message?.content;
+  // Denkt das Modell trotz enable_thinking=false, landet alles in reasoning_content.
+  // Steckt dort brauchbares JSON, retten wir den Lauf daraus statt ihn zu verlieren.
+  if (!content) content = choice?.message?.reasoning_content || '';
   if (!content) {
     if (choice?.finish_reason === 'length') {
       throw new Error(
-        'Token-Budget erschöpft, bevor Content kam (Reasoning-Modell?) — LLM_MAX_TOKENS erhöhen'
+        `Token-Budget erschöpft, bevor Content kam (max_tokens=${maxTokens}, ` +
+          `Prompt ~${promptTokens} von ${ctx} Kontext-Tokens)`
       );
     }
     throw new Error('leere LLM-Antwort');
@@ -295,14 +379,25 @@ export async function chatCompletion(llm, messages, responseFormat) {
  * @param {(token: string) => void} onToken
  * @returns {Promise<string>} vollständiger (gefilterter) Text
  */
-export async function chatCompletionStream(llm, messages, onToken) {
+export async function chatCompletionStream(llm, messages, onToken, opts = {}) {
+  const ctx = await discoverContext(llm);
+  const promptTokens = messagesTokens(messages);
+  const budget = ctx - promptTokens - 256;
+  if (budget < (opts.minOutputTokens ?? 256)) {
+    throw new Error(
+      `Prompt zu groß für '${llm.model}': ~${promptTokens} von ${ctx} Kontext-Tokens belegt`
+    );
+  }
   const body = {
     model: llm.model,
     messages,
     temperature: llm.temperature,
-    max_tokens: llm.maxTokens,
+    max_tokens: Math.max(1, Math.min(llm.maxTokens || budget, budget)),
     stream: true,
   };
+  if (!(opts.thinking ?? llm.thinking)) {
+    body.chat_template_kwargs = { enable_thinking: false };
+  }
   const res = await fetch(`${llm.baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -376,12 +471,17 @@ async function completeWithFormats(llm, messages) {
   let lastErr;
   for (const { name, rf } of formats) {
     try {
-      const raw = await chatCompletion(llm, messages, rf);
+      // Ein Content-Pack braucht realistisch ~1500 Tokens; weniger Budget heißt
+      // abgeschnittenes JSON — dann lieber sofort mit klarer Diagnose scheitern.
+      const raw = await chatCompletion(llm, messages, rf, { minOutputTokens: 1500 });
       const pack = extractJSON(raw);
       pack.pack = { ...(pack.pack || {}), model: llm.model };
       return { pack, raw, formatUsed: name };
     } catch (err) {
       lastErr = err;
+      // Ein zu großer Prompt trifft jedes Format gleich — die Kaskade würde nur
+      // dreimal dieselbe Minute verbrennen. Sofort durchreichen.
+      if (/Prompt zu groß/.test(err.message)) throw err;
       // Bei HTTP 4xx (Format nicht unterstützt) nächstes Format probieren,
       // bei Parse-Fehlern ebenfalls — strengere Validierung folgt ohnehin.
     }

@@ -12,12 +12,19 @@ const headers = {
   authorization: `Bearer ${config.aiImportToken}`,
 };
 
+// Routen, hinter denen ein LLM-Aufruf steckt, brauchen deutlich mehr Zeit als
+// reine Spiel-API-Routen: 120 s reichten für /api/quests/generate nicht (das
+// Modell braucht auf der lokalen GPU regelmäßig 2–4 min) — die Tagesziele
+// fielen dadurch still aus.
+const LLM_ROUTES = /^\/api\/(quests\/generate|players\/plan|assist)/;
+
 async function api(method, route, body) {
+  const timeout = LLM_ROUTES.test(route) ? 900000 : 120000;
   const res = await fetch(`${config.appUrl}${route}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(timeout),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok && res.status !== 422) throw new Error(`${route} → HTTP ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
@@ -42,6 +49,11 @@ export async function runNightly(log = console) {
   // D4: Modell-Routing — die Nacht-Generierung darf das große Qualitäts-Modell nutzen
   const nightlyLlm = { ...config.llm, model: config.llm.modelNightly || config.llm.model };
 
+  // Die Content-Generierung ist nur EIN Teil der Nacht. Schlug sie fehl, brach
+  // bisher der gesamte Lauf ab — KI-Planung, Tagesziele, Kriegs-Auflösung und
+  // Online-Sync fielen tagelang stillschweigend mit aus. Jetzt wird der Fehler
+  // festgehalten und der Rest der Nacht läuft trotzdem.
+  let result = { status: 'error' };
   let generated;
   try {
     generated = await generatePack(exportData, nightlyLlm, balance);
@@ -49,28 +61,30 @@ export async function runNightly(log = console) {
   } catch (err) {
     log.error?.(`[nightly] LLM-Generierung fehlgeschlagen: ${err.message}`);
     await api('POST', '/api/ai/runs', { status: 'error', export: exportData, error: err.message }).catch(() => {});
-    throw err;
+    result = { status: 'error', error: err.message };
   }
 
-  let result = await api('POST', '/api/ai/import', {
-    pack: generated.pack,
-    run: { export: exportData, rawResponse: generated.raw, model: nightlyLlm.model },
-  });
+  if (generated) {
+    result = await api('POST', '/api/ai/import', {
+      pack: generated.pack,
+      run: { export: exportData, rawResponse: generated.raw, model: nightlyLlm.model },
+    });
 
-  // Reparatur-Runde: Bei kompletter Ablehnung bekommt das LLM die konkreten
-  // Fehler EINMAL zurück — konkrete Fehler korrigieren rettet die Nacht.
-  if (result.status === 'rejected' && Array.isArray(result.rejected) && result.rejected.length) {
-    const reasons = result.rejected.map((r) => r.reason || String(r)).slice(0, 12);
-    log.info?.(`[nightly] Pack abgelehnt (${reasons.length} Gründe) → Reparatur-Runde…`);
-    try {
-      const fixed = await repairPack(exportData, nightlyLlm, balance, generated.raw, reasons);
-      result = await api('POST', '/api/ai/import', {
-        pack: fixed.pack,
-        run: { export: exportData, rawResponse: fixed.raw, model: nightlyLlm.model, repaired: true },
-      });
-      log.info?.(`[nightly] Reparatur-Ergebnis: ${result.status}`);
-    } catch (err) {
-      log.warn?.(`[nightly] Reparatur-Runde fehlgeschlagen: ${err.message}`);
+    // Reparatur-Runde: Bei kompletter Ablehnung bekommt das LLM die konkreten
+    // Fehler EINMAL zurück — konkrete Fehler korrigieren rettet die Nacht.
+    if (result.status === 'rejected' && Array.isArray(result.rejected) && result.rejected.length) {
+      const reasons = result.rejected.map((r) => r.reason || String(r)).slice(0, 12);
+      log.info?.(`[nightly] Pack abgelehnt (${reasons.length} Gründe) → Reparatur-Runde…`);
+      try {
+        const fixed = await repairPack(exportData, nightlyLlm, balance, generated.raw, reasons);
+        result = await api('POST', '/api/ai/import', {
+          pack: fixed.pack,
+          run: { export: exportData, rawResponse: fixed.raw, model: nightlyLlm.model, repaired: true },
+        });
+        log.info?.(`[nightly] Reparatur-Ergebnis: ${result.status}`);
+      } catch (err) {
+        log.warn?.(`[nightly] Reparatur-Runde fehlgeschlagen: ${err.message}`);
+      }
     }
   }
 
@@ -115,6 +129,11 @@ export async function runNightly(log = console) {
     log.info?.(`[nightly] Online-Sync übersprungen: ${err.message}`);
   }
 
+  if (!generated) {
+    // Alle übrigen Nacht-Aufgaben sind gelaufen; jetzt darf der Fehler nach oben,
+    // damit der Scheduler ihn sichtbar protokolliert.
+    throw new Error(`Content-Generierung fehlgeschlagen: ${result.error}`);
+  }
   if (result.status === 'rejected') {
     log.warn?.(`[nightly] Pack abgelehnt: ${JSON.stringify(result.rejected).slice(0, 500)}`);
   } else {

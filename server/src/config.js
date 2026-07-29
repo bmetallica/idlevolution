@@ -25,12 +25,21 @@ export const config = {
     // Ohne die Env-Variablen bleibt alles beim Standard-Modell.
     modelNightly: process.env.LLM_MODEL_NIGHTLY || process.env.LLM_MODEL || 'gemma4-12b',
     modelChat: process.env.LLM_MODEL_CHAT || process.env.LLM_MODEL || 'gemma4-12b',
+    // Nur noch Startwert/Fallback: das echte n_ctx wird beim Server erfragt
+    // (discoverContext), weil ein zu hohes LLM_CTX still zu leeren Antworten führte.
     ctx: num(process.env.LLM_CTX, 32768),
-    // Großzügig: Reasoning-Modelle (z.B. Gemma 4) verbrauchen viele Tokens fürs Denken,
-    // bevor der eigentliche JSON-Content kommt.
+    // Obergrenze der Ausgabe; das tatsächliche Budget ist zusätzlich durch
+    // (n_ctx − Prompt) gedeckelt.
     maxTokens: num(process.env.LLM_MAX_TOKENS, 12288),
     temperature: num(process.env.LLM_TEMPERATURE, 0.7),
+    // Reasoning ("<think>") kostet bei den lokalen Modellen das gesamte
+    // Ausgabebudget, bevor JSON kommt. Standard: aus. LLM_THINKING=true reaktiviert es.
+    thinking: process.env.LLM_THINKING === 'true',
   },
+
+  // Token-Budget des nächtlichen Exports. Der Spielstand wächst unbegrenzt —
+  // ohne Deckel frisst der Prompt irgendwann das ganze Kontextfenster.
+  aiExportTokenBudget: num(process.env.AI_EXPORT_TOKEN_BUDGET, 6000),
 
   // Online-Modus (Multiplayer über GitHub, docs/roadmap-multiplayer.md).
   // Die Client-ID ist öffentlich — der Device Flow braucht kein Secret.
