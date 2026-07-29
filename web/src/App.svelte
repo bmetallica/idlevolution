@@ -761,6 +761,7 @@
         buildings={content.buildings}
         {state}
         {resourceIndex}
+        epochs={content.epochs}
         activeId={buildDef?.id}
         {newPackIds}
         on:pick={(e) => {

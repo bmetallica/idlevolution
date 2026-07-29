@@ -6,6 +6,7 @@
   export let resourceIndex = {};
   export let activeId = null; // aktuell gewähltes Bau-Gebäude
   export let newPackIds = new Set();
+  export let epochs = []; // für Klartext-Namen in den Sperrgründen
   export let mobile = false; // Mobile: unteres, horizontal scrollbares Dock statt linker Leiste
   export let topOffset = 48; // Desktop: obere Kante = gemessene Höhe der Materialleiste (weicht ihr aus)
 
@@ -74,6 +75,37 @@
 
   const affordable = (def) => Object.entries(def.cost || {}).every(([rid, amt]) => (state.resources.find((r) => r.id === rid)?.amount ?? 0) >= amt);
   const unlocked = (def) => state.unlocks[def.id]?.unlocked ?? true;
+
+  // Warum ist ein Gebäude gesperrt? Der Server liefert die fehlenden
+  // Bedingungen längst mit (state.unlocks[id].missing) — angezeigt wurde bisher
+  // nur „🔒 gesperrt", was den Spieler ratlos zurückließ.
+  const bName = (id) => buildings.find((b) => b.id === id)?.name?.de || id;
+  const eName = (id) => epochs.find((e) => e.id === id)?.name?.de || id;
+  function lockReasons(def) {
+    return (state.unlocks[def.id]?.missing || []).map((m) => {
+      if (m.type === 'building') return `${m.need}× ${bName(m.id)}${m.have ? ` (hast ${m.have})` : ''}`;
+      if (m.type === 'resource') return `${m.need}× ${resName(m.id)}${m.have ? ` (hast ${Math.floor(m.have)})` : ''}`;
+      if (m.type === 'population') return `${m.need} Einwohner`;
+      // Epochen-Bedingungen tragen die Ziel-Epoche in `need`, nicht in `id`
+      if (m.type === 'epoch') return `Epoche „${eName(m.need)}"`;
+      return m.id || m.type;
+    });
+  }
+
+  /**
+   * Woher kommt eine Ressource, die man nicht hat? Liefert den nächsten
+   * Produzenten samt Freischalt-Stand — beantwortet „woher bekomme ich das?"
+   * genau dort, wo die Frage auftaucht (an den Baukosten).
+   */
+  function sourceOf(rid) {
+    const prod = buildings.filter((b) => (b.production?.outputs || {})[rid] > 0);
+    if (!prod.length) return null;
+    const open = prod.find((b) => unlocked(b));
+    const target = open || prod[0];
+    return { name: bName(target.id), unlocked: !!open, gate: open ? null : lockReasons(target)[0] };
+  }
+  const missingCost = (def) =>
+    Object.entries(def.cost || {}).filter(([rid, amt]) => (state.resources.find((r) => r.id === rid)?.amount ?? 0) < amt);
 
   function describe(def) {
     if (def.description?.de) return def.description.de;
@@ -199,7 +231,24 @@
           {/each}
           {#if def.workers}<span class="text-stone-600 ml-1">👷{def.workers}</span>{/if}
         </div>
-        {#if lock}<div class="text-[10px] text-amber-600/80 mt-0.5">🔒 gesperrt</div>{/if}
+        {#if lock}
+          {@const why = lockReasons(def)}
+          <div class="text-[10px] text-amber-500 mt-0.5">
+            🔒 {why.length ? `Erst bauen: ${why.join(' · ')}` : 'gesperrt'}
+          </div>
+        {:else}
+          <!-- Freigeschaltet, aber Material fehlt → sagen, wo es herkommt -->
+          {#each missingCost(def) as [rid]}
+            {@const src = sourceOf(rid)}
+            {#if src}
+              <div class="text-[10px] text-sky-400/80 mt-0.5">
+                {resIcon(rid)} {resName(rid)} fehlt — {src.unlocked ? `aus: ${src.name}` : `aus: ${src.name} (erst ${src.gate})`}
+              </div>
+            {:else}
+              <div class="text-[10px] text-red-400/80 mt-0.5">{resIcon(rid)} {resName(rid)}: kein Produzent im Spiel</div>
+            {/if}
+          {/each}
+        {/if}
       </button>
     {/each}
     {#if !shown.length}<p class="text-xs text-stone-600 px-1">Keine Gebäude in dieser Kette.</p>{/if}

@@ -34,6 +34,9 @@
 
   $: roadSet = new Set(roads);
   $: clearedSet = new Set(cleared);
+  // Deko-Kontext für die Platzierungsprüfung — gesetzte Felsen/Bäume zählen
+  // fürs Terrain, gerodete Felder werden zu Gras (wie auf dem Server).
+  $: deco = { placed, clearedSet };
   let decoBakes = []; // [{canvas, ox, oy}] je Insel
   let _decoSig = null;
   let painting = false;
@@ -340,7 +343,7 @@
     if (hover) {
       if (buildDef) {
         const fp = footprintOf(buildDef, buildRot);
-        const check = canPlaceClient(map, instances, defIndex, buildDef, hover.gx, hover.gy, buildRot);
+        const check = canPlaceClient(map, instances, defIndex, buildDef, hover.gx, hover.gy, buildRot, deco);
         ctx.fillStyle = check.ok ? 'rgba(80,220,120,0.5)' : 'rgba(230,80,80,0.5)';
         for (let dy = 0; dy < fp.h; dy++) {
           for (let dx = 0; dx < fp.w; dx++) fillDiamond(hover.gx + dx, hover.gy + dy);
@@ -371,7 +374,7 @@
         const rot = movingInst.rot ?? 0;
         const fp = footprintOf(def, rot);
         const others = instances.filter((i) => i.id !== movingInst.id);
-        const check = canPlaceClient(map, others, defIndex, def, hover.gx, hover.gy, rot);
+        const check = canPlaceClient(map, others, defIndex, def, hover.gx, hover.gy, rot, deco);
         ctx.fillStyle = check.ok ? 'rgba(80,220,120,0.5)' : 'rgba(230,80,80,0.5)';
         for (let dy = 0; dy < fp.h; dy++) for (let dx = 0; dx < fp.w; dx++) fillDiamond(hover.gx + dx, hover.gy + dy);
         const geom = buildingViewGeom(hover.gx, hover.gy, fp);
@@ -859,7 +862,7 @@
         // Klick 2: auf neues Feld absetzen (Server prüft erneut)
         const rot = movingInst.rot ?? 0;
         const others = instances.filter((i) => i.id !== movingInst.id);
-        const check = canPlaceClient(map, others, defIndex, defIndex[movingInst.buildingId], g.gx, g.gy, rot);
+        const check = canPlaceClient(map, others, defIndex, defIndex[movingInst.buildingId], g.gx, g.gy, rot, deco);
         dispatch('move', { instanceId: movingInst.id, x: g.gx, y: g.gy, ok: check.ok, reason: check.reason });
         movingInst = null;
       }
@@ -867,7 +870,7 @@
     }
     if (buildDef) {
       if (reticle) return; // Mobile: Platzierung nur über den ✓-Button (placeAtCenter)
-      const check = canPlaceClient(map, instances, defIndex, buildDef, g.gx, g.gy, buildRot);
+      const check = canPlaceClient(map, instances, defIndex, buildDef, g.gx, g.gy, buildRot, deco);
       dispatch('place', { buildingId: buildDef.id, x: g.gx, y: g.gy, rot: buildRot, ok: check.ok, reason: check.reason });
     } else {
       const inst = instanceAt(g.gx, g.gy);
@@ -914,7 +917,7 @@
     const p = reticleXY();
     const g = pointerToGrid(p.x, p.y);
     if (g.gx < 0 || g.gy < 0 || g.gx >= map.width || g.gy >= map.height) return;
-    const check = canPlaceClient(map, instances, defIndex, buildDef, g.gx, g.gy, buildRot);
+    const check = canPlaceClient(map, instances, defIndex, buildDef, g.gx, g.gy, buildRot, deco);
     dispatch('place', { buildingId: buildDef.id, x: g.gx, y: g.gy, rot: buildRot, ok: check.ok, reason: check.reason });
   }
   export function focusIsland(id) {
