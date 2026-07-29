@@ -1,9 +1,9 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte';
-  import { fetchContent, fetchState, fetchFrame, fetchMap, build, moveInstance, setRoad, setDeco, fetchPlayers, enableAi, disableAi, sendShip, attack, cancelAttack, fetchMarket, createOffer, acceptOffer, cancelOffer, onlineIsland, onlineAdopt, onlineTrade, onlineTradeOffer, onlineTradeCancel, onlineTradeAccept } from './lib/api.js';
+  import { fetchContent, fetchState, fetchFrame, fetchMap, build, moveInstance, setRoad, setDeco, fetchPlayers, fetchMarket, onlineIsland, onlineAdopt, onlineTrade } from './lib/api.js';
   import { buildChainIndex, computeShortages, computeBottlenecks } from './lib/chains.js';
   import { recordSample, getHistory } from './lib/history.js';
-  import { sfxThud, sfxCoin, sfxError, isMuted, setMuted } from './lib/sound.js';
+  import { sfxThud, sfxError, isMuted, setMuted } from './lib/sound.js';
 
   let soundMuted = isMuted(); // D3: Mute-Zustand (persistiert)
   function toggleSound() { soundMuted = !soundMuted; setMuted(soundMuted); }
@@ -13,8 +13,9 @@
   import BuildPalette from './components/BuildPalette.svelte';
   import InfoPanel from './components/InfoPanel.svelte';
   import Chronicle from './components/Chronicle.svelte';
+  import MarketPanel from './components/MarketPanel.svelte';
+  import NeighborsPanel from './components/NeighborsPanel.svelte';
   import AiAssist from './components/AiAssist.svelte';
-  import OnlineSection from './components/OnlineSection.svelte';
   import WorkerPanel from './components/WorkerPanel.svelte';
   import Onboarding from './components/Onboarding.svelte';
 
@@ -100,108 +101,26 @@
   async function loadPlayers() {
     try { players = await fetchPlayers(); } catch {}
   }
-  async function addAi() {
-    if (aiBusy) return; aiBusy = true;
-    try { const r = await enableAi(); showFlash(`KI-Spieler „${r.player.name}" auf Insel ${r.player.islandId} zugeschaltet`); await loadPlayers(); mapComp?.focusIsland?.(r.player.islandId); }
-    catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  async function removeAi(id) {
-    aiBusy = true;
-    try { await disableAi(id); await loadPlayers(); } catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
   // Handelsmarkt (Stufe 5) + Online-Handel (Multiplayer M3)
   let showMarket = false;
   let market = null;
   let oTrade = null; // /api/online/trade: eigene Angebote/Accepts + fremde Angebote
-  let offGive = '', offGiveAmt = 50, offWant = '', offWantAmt = 50;
   async function loadMarket() {
     try { market = await fetchMarket(); } catch {}
     try { oTrade = await onlineTrade(); } catch {}
   }
-  // ⚖ Fairness aus Sicht des Annehmers: Wert(bekomme) / Wert(zahle) nach baseValue
-  function fairness(o) {
-    const gv = resourceIndex[o.give.resourceId]?.baseValue, wv = resourceIndex[o.want.resourceId]?.baseValue;
-    if (!gv || !wv) return null;
-    const ratio = (gv * o.give.amount) / (wv * o.want.amount);
-    return ratio >= 1.15 ? { icon: '🟢', label: 'günstig' } : ratio <= 0.85 ? { icon: '🔴', label: 'teuer' } : { icon: '⚖️', label: 'fair' };
+  /** Der Markt meldet Änderungen zurück: Meldung anzeigen + Daten neu laden. */
+  async function onMarketChanged(e) {
+    if (e.detail?.msg) showFlash(e.detail.msg, e.detail.ok !== false);
+    await loadMarket();
+    await pollState();
   }
-  async function submitOnlineOffer() {
-    if (!offGive || !offWant || offGive === offWant || aiBusy) return;
-    aiBusy = true;
-    try { const r = await onlineTradeOffer(offGive, offGiveAmt, offWant, offWantAmt); if (!r.ok) throw new Error(r.error); showFlash('🌐 Online-Angebot eingestellt — wird veröffentlicht'); await loadMarket(); await pollState(); }
-    catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
+  /** Das Nachbarn-Panel meldet Änderungen zurück. */
+  async function onPlayersChanged(e) {
+    if (e.detail?.msg) showFlash(e.detail.msg, e.detail.ok !== false);
+    await loadPlayers();
+    await pollState();
   }
-  async function takeOnlineOffer(owner, id) {
-    aiBusy = true;
-    try { const r = await onlineTradeAccept(owner, id); if (!r.ok) throw new Error(r.error); showFlash('🌐 Angenommen — die Gegenseite bucht beim nächsten Sync'); await loadMarket(); await pollState(); }
-    catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  async function dropOnlineOffer(id) {
-    aiBusy = true;
-    try { const r = await onlineTradeCancel(id); if (!r.ok) throw new Error(r.error); showFlash('Online-Angebot zurückgezogen'); await loadMarket(); await pollState(); }
-    catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  async function submitOffer() {
-    if (!offGive || !offWant || offGive === offWant || aiBusy) return;
-    aiBusy = true;
-    try { await createOffer(offGive, offGiveAmt, offWant, offWantAmt); sfxCoin(); showFlash('Angebot eingestellt'); await loadMarket(); await pollState(); }
-    catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  async function takeOffer(id) {
-    aiBusy = true;
-    try { await acceptOffer(id); sfxCoin(); showFlash('📦 Angenommen — Schiffe unterwegs'); await loadMarket(); await pollState(); }
-    catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  async function dropOffer(id) {
-    aiBusy = true;
-    try { await cancelOffer(id); await loadMarket(); await pollState(); } catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  // Ware verschiffen
-  let sendTo = null, sendRes = '', sendAmt = 50;
-  $: humanHarbor = (players?.players || []).find((p) => p.id === 0)?.harbor;
-  // Krieg (Stufe 6 v2): tagsüber erklären, die Schlacht schlägt sich nachts
-  let atkTo = null, atkSoldiers = 10;
-  $: humanArmy = (players?.players || []).find((p) => p.id === 0)?.army ?? 0;
-  async function launchAttack() {
-    if (!atkTo || !(atkSoldiers > 0) || aiBusy) return;
-    aiBusy = true;
-    try {
-      const r = await attack(atkTo, atkSoldiers);
-      if (!r.ok) throw new Error(r.error);
-      showFlash(`⚔️ Krieg erklärt — ${r.soldiers} Soldaten schlagen in der kommenden Nacht zu`);
-      await loadPlayers(); await pollState();
-    } catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  async function withdrawAttack(defenderId) {
-    if (aiBusy) return; aiBusy = true;
-    try {
-      const r = await cancelAttack(defenderId);
-      if (!r.ok) throw new Error(r.error);
-      showFlash(`↩️ Kriegserklärung zurückgezogen — ${r.soldiers} Soldaten kehren zurück`);
-      await loadPlayers(); await pollState();
-    } catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  async function sendGoods() {
-    if (!sendTo || !sendRes || !(sendAmt > 0) || aiBusy) return;
-    aiBusy = true;
-    try { await sendShip(sendTo, sendRes, sendAmt); showFlash(`📦 ${sendAmt}× ${resourceIndex[sendRes]?.name?.de || sendRes} verschifft`); await loadPlayers(); }
-    catch (e) { showFlash(e.message, false); }
-    aiBusy = false;
-  }
-  // Rangliste: nach Bevölkerung, dann Gebäudezahl (für den Vergleich im 🌍-Panel)
-  $: rankedPlayers = players
-    ? [...players.players].sort((a, b) => (b.population - a.population) || (b.buildings - a.buildings))
-    : [];
   // Alle Instanzen (Mensch detailliert aus state + KI-Inseln aus /api/players) für die Weltansicht
   // Fremde (KI-)Instanzen werden mit Besitzer markiert → InfoPanel zeigt sie nur an,
   // ohne Steuerung (Arbeiter/Drehen/Abriss wirken nur auf die eigene Insel).
@@ -745,224 +664,32 @@
       </div>
     {/if}
 
-    <!-- Handelsmarkt-Panel (Stufe 5) -->
+    <!-- Handelsmarkt-Panel (Stufe 5) + Online-Handel -->
     {#if showMarket}
-      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-amber-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 overflow-y-auto'} style={$isMobile ? '' : `top: ${topBarH + 52}px; max-height: calc(100vh - ${topBarH + 64}px)`}>
-        <div class="flex items-center gap-2 mb-2">
-          <span class="text-sm font-semibold text-amber-200">🪙 Handelsmarkt</span>
-          <button class="ml-auto text-stone-500 hover:text-stone-200" on:click={() => (showMarket = false)}>✕</button>
-        </div>
-        {#if market}
-          {#if !market.hasHarbor}
-            <p class="text-[11px] text-stone-500 mb-2">Baue einen ⚓ <b>Hafen</b>, um zu handeln.</p>
-          {/if}
-          {#if market.offers.length}
-            <div class="space-y-1.5">
-              {#each market.offers as o}
-                {@const g = resourceIndex[o.give.resourceId]}
-                {@const w = resourceIndex[o.want.resourceId]}
-                <div class="rounded border border-stone-700 bg-stone-800/60 px-2 py-1.5 text-sm">
-                  <div class="flex items-center gap-1 flex-wrap">
-                    <span class="text-emerald-300">{g?.icon || ''} {o.give.amount} {g?.name?.de || o.give.resourceId}</span>
-                    <span class="text-stone-500">→</span>
-                    <span class="text-amber-300">{w?.icon || ''} {o.want.amount} {w?.name?.de || o.want.resourceId}</span>
-                  </div>
-                  <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-[11px] text-stone-500">von {o.ownerName}</span>
-                    {#if o.mine}
-                      <button class="ml-auto text-[11px] text-stone-400 hover:text-red-300" on:click={() => dropOffer(o.id)} disabled={aiBusy}>zurücknehmen</button>
-                    {:else}
-                      <button class="ml-auto text-[11px] rounded bg-amber-700 hover:bg-amber-600 disabled:opacity-40 px-2 py-0.5 text-white" on:click={() => takeOffer(o.id)} disabled={aiBusy || !market.hasHarbor}>annehmen</button>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <p class="text-[11px] text-stone-500">Noch keine Angebote am Markt.</p>
-          {/if}
-          {#if market.hasHarbor}
-            <div class="mt-2.5 pt-2 border-t border-stone-800">
-              <div class="text-[11px] text-stone-400 mb-1">Angebot einstellen (gebe → nehme)</div>
-              <div class="flex items-center gap-1">
-                <input type="number" min="1" bind:value={offGiveAmt} class="w-12 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
-                <select bind:value={offGive} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
-                  <option value="">gebe…</option>
-                  {#each (state?.resources || []).filter((r) => r.amount >= 1 && resourceIndex[r.id]?.category !== 'special') as r}<option value={r.id}>{resourceIndex[r.id]?.icon || ''} {resourceIndex[r.id]?.name?.de || r.id}</option>{/each}
-                </select>
-              </div>
-              <div class="flex items-center gap-1 mt-1">
-                <input type="number" min="1" bind:value={offWantAmt} class="w-12 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
-                <select bind:value={offWant} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
-                  <option value="">nehme…</option>
-                  {#each (content?.resources || []).filter((r) => r.category !== 'special') as r}<option value={r.id}>{r.icon || ''} {r.name?.de || r.id}</option>{/each}
-                </select>
-                <button class="rounded bg-amber-700 hover:bg-amber-600 disabled:opacity-40 px-2 text-white text-sm" on:click={submitOffer} disabled={aiBusy || !offGive || !offWant}>+</button>
-                {#if oTrade?.connected}
-                  <button class="rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-2 text-white text-sm" on:click={submitOnlineOffer} disabled={aiBusy || !offGive || !offWant} title="Als ONLINE-Angebot für andere Spieler veröffentlichen">🌐</button>
-                {/if}
-              </div>
-            </div>
-          {/if}
-
-          <!-- Online-Handel (Multiplayer M3) -->
-          {#if oTrade && (oTrade.marketOffers.length || oTrade.offers.length || oTrade.accepts.length)}
-            <div class="mt-2.5 pt-2 border-t border-stone-800">
-              <div class="text-[11px] text-sky-300 mb-1">🌐 Online-Angebote <span class="text-stone-600">(Abwicklung beim nächsten Sync)</span></div>
-              {#each oTrade.marketOffers as o (o.owner + o.id)}
-                {@const g = resourceIndex[o.give.resourceId]}
-                {@const w = resourceIndex[o.want.resourceId]}
-                {@const fair = fairness(o)}
-                <div class="rounded border border-sky-900/70 bg-stone-800/60 px-2 py-1.5 text-sm mb-1.5">
-                  <div class="flex items-center gap-1 flex-wrap">
-                    <span class="text-emerald-300">{g?.icon || '❓'} {o.give.amount} {g?.name?.de || o.give.resourceId}</span>
-                    <span class="text-stone-500">→</span>
-                    <span class="text-amber-300">{w?.icon || '❓'} {o.want.amount} {w?.name?.de || o.want.resourceId}</span>
-                    {#if fair}<span class="text-[10px] text-stone-400 ml-1" title="Einschätzung nach Warenwert (baseValue)">{fair.icon} {fair.label}</span>{/if}
-                  </div>
-                  <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-[11px] text-stone-500">von 🌐 {o.owner}</span>
-                    {#if o.accepted}
-                      <span class="ml-auto text-[11px] text-sky-400">⏳ angenommen — wartet auf Gegenseite</span>
-                    {:else if !o.giveKnown}
-                      <span class="ml-auto text-[11px] text-stone-500" title="Erst die Inhalte dieses Nachbarn übernehmen (✨ beim Besuchen)">❓ unbekannte Ware</span>
-                    {:else}
-                      <button class="ml-auto text-[11px] rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-2 py-0.5 text-white" on:click={() => takeOnlineOffer(o.owner, o.id)} disabled={aiBusy || !oTrade.connected}>annehmen</button>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-              {#each oTrade.offers as o (o.id)}
-                {@const g = resourceIndex[o.give.resourceId]}
-                {@const w = resourceIndex[o.want.resourceId]}
-                <div class="rounded border border-stone-700 bg-stone-800/40 px-2 py-1.5 text-sm mb-1.5">
-                  <div class="flex items-center gap-1 flex-wrap">
-                    <span class="text-emerald-300">{g?.icon || ''} {o.give.amount} {g?.name?.de || o.give.resourceId}</span>
-                    <span class="text-stone-500">→</span>
-                    <span class="text-amber-300">{w?.icon || ''} {o.want.amount} {w?.name?.de || o.want.resourceId}</span>
-                    <span class="text-[10px] text-stone-500 ml-1">dein 🌐-Angebot</span>
-                    <button class="ml-auto text-[11px] text-stone-400 hover:text-red-300" on:click={() => dropOnlineOffer(o.id)} disabled={aiBusy}>zurückziehen</button>
-                  </div>
-                </div>
-              {/each}
-              {#each oTrade.accepts as a (a.offerId)}
-                <p class="text-[11px] text-stone-500 mb-1">⏳ {a.want.amount} {resourceIndex[a.want.resourceId]?.name?.de || a.want.resourceId} an 🌐 {a.offerOwner} gezahlt — Ware kommt mit dem nächsten Sync beider Seiten.</p>
-              {/each}
-            </div>
-          {/if}
-        {:else}
-          <p class="text-xs text-stone-500">Lade…</p>
-        {/if}
-      </div>
+      <MarketPanel
+        {market}
+        {oTrade}
+        {resourceIndex}
+        {topBarH}
+        ownResources={state?.resources || []}
+        allResources={content?.resources || []}
+        on:close={() => (showMarket = false)}
+        on:changed={onMarketChanged}
+      />
     {/if}
 
-    <!-- Nachbarn / KI-Spieler-Panel -->
+    <!-- Nachbarn / KI-Spieler-Panel (Rangliste, Verschiffen, Krieg, Online) -->
     {#if showPlayers}
-      <!-- scrollbar: auf kleinen Displays war der untere Teil sonst unerreichbar -->
-      <div class={$isMobile ? 'mobile-sheet p-3' : 'absolute right-3 z-30 w-80 max-w-[92vw] rounded-lg border border-sky-800 bg-stone-900/95 backdrop-blur shadow-xl p-3 overflow-y-auto'} style={$isMobile ? '' : `top: ${topBarH + 52}px; max-height: calc(100vh - ${topBarH + 64}px)`}>
-        <div class="flex items-center gap-2 mb-2">
-          <span class="text-sm font-semibold text-sky-200">🌍 Nachbarn</span>
-          <button class="ml-auto text-stone-500 hover:text-stone-200" on:click={() => (showPlayers = false)}>✕</button>
-        </div>
-        {#if players}
-          <div class="space-y-1.5">
-            {#each rankedPlayers as p, i}
-              <div class="flex items-center gap-2 rounded border px-2 py-1.5 text-sm {p.kind === 'human' ? 'border-emerald-800/70 bg-emerald-950/30' : 'border-stone-700 bg-stone-800/60'}">
-                <span class="text-xs font-mono text-stone-500 w-4 text-right">{i + 1}</span>
-                <span>{p.kind === 'human' ? '🧑' : '🤖'}</span>
-                <button class="text-left flex-1 min-w-0" title="Zur Insel springen" on:click={() => mapComp?.focusIsland?.(p.islandId)}>
-                  <div class="text-stone-200 truncate">{p.name}{p.kind === 'human' ? ' (du)' : ''}{#if p.personality}<span class="text-[10px] text-sky-400/80"> · {p.personality}</span>{/if}</div>
-                  <div class="text-[11px] text-stone-500">Insel {p.islandId} · 👥 {p.population} · {p.epoch || '—'} · 🏠 {p.buildings}{#if p.army || p.defense} · <span title="Armee / Verteidigung">⚔️{p.army} 🛡️{p.defense}</span>{/if}</div>
-                  {#if p.strategy}<div class="text-[11px] text-sky-300/80 truncate" title={p.strategy}>🎯 {p.strategy}</div>{/if}
-                  {#if p.chronicle}<div class="text-[11px] text-stone-400 italic truncate" title={p.chronicle}>„{p.chronicle}"</div>{/if}
-                </button>
-                {#if p.kind === 'ai'}
-                  <button class="text-xs text-stone-500 hover:text-red-300" title="KI abschalten" on:click={() => removeAi(p.id)} disabled={aiBusy}>⏻</button>
-                {/if}
-              </div>
-            {/each}
-          </div>
-          <!-- Ware verschiffen (Stufe 4) -->
-          <div class="mt-2.5 pt-2 border-t border-stone-800">
-            {#if humanHarbor}
-              {@const dests = players.players.filter((p) => p.id !== 0 && p.active && p.harbor)}
-              {#if dests.length}
-                <div class="text-[11px] text-stone-400 mb-1">📦 Ware verschiffen</div>
-                <div class="flex gap-1">
-                  <select bind:value={sendTo} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
-                    <option value={null}>Ziel…</option>
-                    {#each dests as p}<option value={p.islandId}>{p.name}</option>{/each}
-                  </select>
-                  <select bind:value={sendRes} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
-                    <option value="">Ware…</option>
-                    {#each (state?.resources || []).filter((r) => r.amount >= 1 && resourceIndex[r.id]?.category !== 'special') as r}<option value={r.id}>{resourceIndex[r.id]?.icon || ''} {resourceIndex[r.id]?.name?.de || r.id}</option>{/each}
-                  </select>
-                  <input type="number" min="1" bind:value={sendAmt} class="w-14 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
-                  <button class="rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-40 px-2 text-white" on:click={sendGoods} disabled={aiBusy || !sendTo || !sendRes} title="Verschiffen">➤</button>
-                </div>
-              {:else}
-                <p class="text-[11px] text-stone-500">Kein Nachbar mit ⚓ Hafen — noch kein Ziel zum Verschiffen.</p>
-              {/if}
-            {:else}
-              <p class="text-[11px] text-stone-500">Baue einen ⚓ <b>Hafen</b>, um Waren zu anderen Inseln zu verschiffen.</p>
-            {/if}
-          </div>
-
-          <!-- Krieg (Stufe 6 v2): tagsüber erklären, Schlacht in der Nacht — kein Erobern, nur Beute -->
-          {#if humanArmy > 0}
-            {@const targets = players.players.filter((p) => p.id !== 0 && p.active)}
-            {#if targets.length}
-              <div class="mt-2.5 pt-2 border-t border-stone-800">
-                <div class="text-[11px] text-red-300/90 mb-1">⚔️ Raubzug erklären <span class="text-stone-600">({humanArmy} Soldaten · Schlacht in der kommenden Nacht · Sieger plündert Beute)</span></div>
-                <div class="flex gap-1">
-                  <select bind:value={atkTo} class="min-w-0 flex-1 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200">
-                    <option value={null}>Ziel…</option>
-                    {#each targets as p}<option value={p.islandId}>{p.name} (🛡️{p.defense})</option>{/each}
-                  </select>
-                  <input type="number" min="1" max={humanArmy} bind:value={atkSoldiers} class="w-14 bg-stone-950 border border-stone-700 rounded px-1 py-1 text-xs text-stone-200" />
-                  <button class="rounded bg-red-800 hover:bg-red-700 disabled:opacity-40 px-2 text-white" on:click={launchAttack} disabled={aiBusy || !atkTo || !(atkSoldiers > 0)} title="Krieg erklären — Schlacht in der kommenden Nacht">⚔️</button>
-                </div>
-              </div>
-            {/if}
-          {/if}
-
-          <!-- Offene Kriegserklärungen (öffentlich — Schlacht in der kommenden Nacht) -->
-          {#if players.warDeclarations?.length}
-            <div class="mt-2 space-y-0.5">
-              {#each players.warDeclarations as d}
-                <div class="flex items-center gap-1 text-[11px] {d.defenderId === 0 ? 'text-red-300' : 'text-amber-300/90'}">
-                  <span>{d.retaliation ? '🔥' : '⚔️'} {d.attacker} → {d.defender} ({d.soldiers} Soldaten, heute Nacht)</span>
-                  {#if d.attackerId === 0}
-                    <button class="ml-auto text-stone-500 hover:text-stone-200" title="Zurückziehen" on:click={() => withdrawAttack(d.defenderId)} disabled={aiBusy}>↩️</button>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {/if}
-
-          <!-- Kriegs-Protokoll -->
-          {#if players.warLog?.length}
-            <div class="mt-2.5 pt-2 border-t border-stone-800 space-y-0.5">
-              <div class="text-[11px] text-stone-400">📜 Kriegs-Protokoll</div>
-              {#each players.warLog as w}
-                <p class="text-[11px] text-stone-500">{w.report}</p>
-              {/each}
-            </div>
-          {/if}
-
-          {#if (players.players.filter((p) => p.kind === 'ai').length) < (players.maxAi ?? 4)}
-            <button class="mt-2.5 w-full rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-50 px-3 py-1.5 text-sm text-white" on:click={addAi} disabled={aiBusy || !(players.freeSlots || []).length}>
-              ➕ KI-Spieler zuschalten
-            </button>
-          {:else}
-            <p class="mt-2 text-[11px] text-stone-500">Maximal {players.maxAi} KI-Spieler.</p>
-          {/if}
-          <p class="mt-2 text-[11px] text-stone-500">KI-Inseln entwickeln sich in Echtzeit mit. Klick auf einen Namen springt hin.</p>
-          <OnlineSection on:visit={(e) => visitOnline(e.detail.owner)} />
-        {:else}
-          <p class="text-xs text-stone-500">Lade…</p>
-        {/if}
-      </div>
+      <NeighborsPanel
+        {players}
+        {resourceIndex}
+        {topBarH}
+        ownResources={state?.resources || []}
+        on:close={() => (showPlayers = false)}
+        on:changed={onPlayersChanged}
+        on:focusIsland={(e) => mapComp?.focusIsland?.(e.detail.islandId)}
+        on:visit={(e) => visitOnline(e.detail.owner)}
+      />
     {/if}
 
     <!-- KI-Berater-Panel -->
