@@ -110,7 +110,8 @@ export default async function onlineRoutes(fastify) {
         { path: `islands/${s.username}/accepts.json`, content: JSON.stringify({ version: 1, owner: s.username, accepts: trade.accepts || [] }, null, 1) + '\n' },
       ];
       for (const f of files) {
-        if (Buffer.byteLength(f.content) > 512 * 1024) throw new Error(`${f.path} überschreitet 512 KB`);
+        const maxKb = f.path.endsWith('/packs.json') ? 2048 : 512; // Limits des zentralen Repos
+        if (Buffer.byteLength(f.content) > maxKb * 1024) throw new Error(`${f.path} überschreitet ${maxKb} KB`);
       }
       const { prUrl } = await publishFiles(s.token, s.username, ctx.config.online.repo, files);
       ctx.online.settings = { ...ctx.online.settings, lastPublish: { at: new Date().toISOString(), prUrl, instances: island.instances.length } };

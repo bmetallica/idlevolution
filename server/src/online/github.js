@@ -19,7 +19,6 @@ async function gh(token, method, path, body) {
   return d;
 }
 
-const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -43,21 +42,22 @@ export async function publishFiles(token, user, centralRepo, files) {
     await gh(token, 'POST', `/repos/${writeRepo}/merge-upstream`, { branch: 'main' }).catch(() => {});
   }
 
-  // Branch exakt auf central/main (bzw. Fork-main nach Sync) setzen
+  // Alle Dateien als EIN Commit auf central/main (bzw. Fork-main nach Sync) und
+  // den Branch in einem Schritt darauf setzen — Einzel-Commits würden pro Datei
+  // einen Action-Lauf auslösen, der jeweils einen Teilstand prüft.
   const baseSha = (await gh(token, 'GET', `/repos/${writeRepo}/git/ref/heads/main`)).object.sha;
+  const baseTree = (await gh(token, 'GET', `/repos/${writeRepo}/git/commits/${baseSha}`)).tree.sha;
+  const tree = await gh(token, 'POST', `/repos/${writeRepo}/git/trees`, {
+    base_tree: baseTree,
+    tree: files.map((f) => ({ path: f.path, mode: '100644', type: 'blob', content: f.content })),
+  });
+  const commit = await gh(token, 'POST', `/repos/${writeRepo}/git/commits`, {
+    message: `Insel-Update: ${user}`, tree: tree.sha, parents: [baseSha],
+  });
   try {
-    await gh(token, 'POST', `/repos/${writeRepo}/git/refs`, { ref: `refs/heads/${branch}`, sha: baseSha });
+    await gh(token, 'POST', `/repos/${writeRepo}/git/refs`, { ref: `refs/heads/${branch}`, sha: commit.sha });
   } catch {
-    await gh(token, 'PATCH', `/repos/${writeRepo}/git/refs/heads/${branch}`, { sha: baseSha, force: true });
-  }
-
-  // Dateien committen (Contents-API; bei bestehender Datei ist deren sha nötig)
-  for (const f of files) {
-    const cur = await gh(token, 'GET', `/repos/${writeRepo}/contents/${f.path}?ref=${branch}`).catch(() => null);
-    await gh(token, 'PUT', `/repos/${writeRepo}/contents/${f.path}`, {
-      message: `Insel-Update: ${user}`, content: b64(f.content), branch,
-      ...(cur?.sha ? { sha: cur.sha } : {}),
-    });
+    await gh(token, 'PATCH', `/repos/${writeRepo}/git/refs/heads/${branch}`, { sha: commit.sha, force: true });
   }
 
   // PR öffnen (existiert schon einer für den Branch, wird er durch die Commits aktualisiert)

@@ -154,8 +154,8 @@ export function sanitizePacks(d, expectedOwner) {
   const take = (arr, fn, max) => (Array.isArray(arr) ? arr.slice(0, max).map(fn).filter(Boolean) : []);
   return {
     version: 1, owner: d.owner,
-    buildings: take(d.buildings, sanitizeBuilding, 200),
-    resources: take(d.resources, sanitizeResource, 200),
+    buildings: take(d.buildings, sanitizeBuilding, 1000),
+    resources: take(d.resources, sanitizeResource, 1000),
     epochs: take(d.epochs, sanitizeEpoch, 30),
   };
 }

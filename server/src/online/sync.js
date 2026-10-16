@@ -10,13 +10,14 @@ import { validateIsland, sanitizePacks, sanitizeOffers, sanitizeAccepts, checkOw
 
 const RAW = 'https://raw.githubusercontent.com';
 const MAX_BYTES = 700 * 1024;
+const MAX_PACKS_BYTES = 2.2 * 1024 * 1024; // zentrales Repo erlaubt packs.json bis 2 MB
 const MAX_ISLANDS = 100;
 
-async function fetchJson(url) {
+async function fetchJson(url, maxBytes = MAX_BYTES) {
   const res = await fetch(url, { headers: { 'User-Agent': 'idlevolution' } });
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   const text = await res.text();
-  if (text.length > MAX_BYTES) throw new Error(`Antwort zu groß (${text.length} B): ${url}`);
+  if (text.length > maxBytes) throw new Error(`Antwort zu groß (${text.length} B): ${url}`);
   return JSON.parse(text);
 }
 
@@ -48,7 +49,7 @@ export async function syncOnline(ctx, log = console) {
       const island = validateIsland(rawIsland, owner);
       let packs = { version: 1, owner, buildings: [], resources: [], epochs: [] };
       if (entry.hasPacks) {
-        try { packs = sanitizePacks(await fetchJson(`${base}/islands/${owner}/packs.json`), owner); }
+        try { packs = sanitizePacks(await fetchJson(`${base}/islands/${owner}/packs.json`, MAX_PACKS_BYTES), owner); }
         catch (err) { log.warn?.(`[online-sync] packs von ${owner} verworfen: ${err.message}`); }
       }
       // Handel (M3): Angebote/Accepts sind optional — 404 ⇒ leer
