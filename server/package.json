@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "balance:report": "node scripts/balance-report.js"
   },
   "dependencies": {

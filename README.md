@@ -137,7 +137,7 @@ Drei Container, klare Trennung von **Code**, **dynamischem Zustand** und **Inhal
 
 | Service     | Aufgabe |
 |-------------|---------|
-| `app`       | Fastify-Backend (Node 20, ESM) + gebautes Svelte-4-UI. Lädt die Content-Packs, führt die Tick-Simulation aus, dient die API und persistiert den Spielstand in PostgreSQL. |
+| `app`       | Fastify-Backend (Node 24, ESM) + gebautes Svelte-4-UI. Lädt die Content-Packs, führt die Tick-Simulation aus, dient die API und persistiert den Spielstand in PostgreSQL. |
 | `db`        | PostgreSQL 16 — **nur dynamischer Zustand** (Bestände, platzierte Gebäude, Straßen, Epoche, Audit-Log). Content-Definitionen bleiben Dateien. |
 | `ai-worker` | Cron-Scheduler (`AI_CRON`, Standard 03:00). Holt den Siedlungs-Status, ruft das LLM und reicht das Ergebnis über die API zum Import ein. |
 

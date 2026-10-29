@@ -1,5 +1,5 @@
 # ── Stage 1: Frontend bauen ──────────────────────────────────
-FROM node:20-alpine AS webbuild
+FROM node:24.22.2-alpine AS webbuild
 WORKDIR /web
 COPY web/package.json ./
 RUN npm install --no-audit --no-fund
@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # ── Stage 2: Server ──────────────────────────────────────────
-FROM node:20-alpine
+FROM node:24.22.2-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 COPY server/package.json ./
